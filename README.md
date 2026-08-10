@@ -55,6 +55,27 @@ npm start
 Then open **http://localhost:3000** in a browser. Share that URL (or your
 deployed URL) with the team so everyone works off the same planner.
 
+### Opening in VS Code
+
+The repo ships with a `.vscode/` config, so cloning and opening it in VS
+Code gets you a ready-to-run project — no manual setup needed.
+
+- **Desktop app:** clone the repo, then `code .` from the project folder
+  (or use VS Code's *File → Open Folder…*). On first open you'll be
+  prompted to install the recommended extensions (ESLint, Prettier,
+  EditorConfig, REST Client) — accept, then run **Terminal → Run Task →
+  Start Weekly Planner**, or hit **F5** to launch the server with the
+  debugger attached (breakpoints work in `server.js`).
+- **Browser, no install:** press `.` on this repo's GitHub page, or go to
+  `https://github.dev/spatius92-cloud/Weekly-Planner` to open a full VS
+  Code editor in the browser instantly. (Note: github.dev is edit-only —
+  it can't run the Node server itself; use it for browsing/editing code,
+  and a real machine or a GitHub Codespace to actually run `npm start`.)
+- **GitHub Codespaces** (if enabled on the repo): *Code → Codespaces →
+  Create codespace* gives you a full cloud VS Code with a terminal, so you
+  can `npm install && npm start` and get a forwarded port to the running
+  app without installing anything locally.
+
 ## Project structure
 
 ```

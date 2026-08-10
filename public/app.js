@@ -64,7 +64,17 @@
   async function loadState() {
     state = await api('/api/state');
     ensureCurrentUser();
+    reconcileFilters();
     renderAll();
+  }
+
+  // Drop any active filter for a member who no longer exists (e.g. removed
+  // by this or another browser), so the board can't get stuck showing
+  // "no activities" for an id nothing can toggle off anymore.
+  function reconcileFilters() {
+    for (const id of [...activeFilters]) {
+      if (!state.members.some((m) => m.id === id)) activeFilters.delete(id);
+    }
   }
 
   // ---------- current user ----------
