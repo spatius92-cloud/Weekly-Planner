@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Frame &amp; Frqnc — Weekly Planner</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-mark">F&amp;F</div>
+      <div>
+        <h1>Frame &amp; Frqnc</h1>
+        <p class="subtitle">Weekly Planner</p>
+      </div>
+    </div>
+
+    <div class="week-nav">
+      <button id="prevWeek" class="icon-btn" title="Previous week">&#8592;</button>
+      <div class="week-label" id="weekLabel">Week of —</div>
+      <button id="nextWeek" class="icon-btn" title="Next week">&#8594;</button>
+      <button id="todayBtn" class="ghost-btn">This week</button>
+    </div>
+
+    <div class="user-controls">
+      <label class="sr-only" for="currentUser">You are</label>
+      <select id="currentUser"></select>
+      <button id="manageMembersBtn" class="ghost-btn">Team</button>
+      <button id="addTaskBtn" class="primary-btn">+ Add activity</button>
+    </div>
+  </header>
+
+  <section class="summary-bar">
+    <div class="filters" id="memberFilters"></div>
+    <div class="progress-wrap">
+      <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+      <span id="progressLabel">0 / 0 completed this week</span>
+    </div>
+  </section>
+
+  <main class="board" id="board">
+    <!-- 7 day columns injected by app.js -->
+  </main>
+
+  <!-- Task modal -->
+  <div class="modal-backdrop" id="taskModalBackdrop">
+    <div class="modal">
+      <h2 id="taskModalTitle">Add activity</h2>
+      <form id="taskForm">
+        <input type="hidden" id="taskId" />
+        <label>
+          Title
+          <input type="text" id="taskTitle" required maxlength="120" placeholder="e.g. Client shoot — downtown loft" />
+        </label>
+        <div class="grid-2">
+          <label>
+            Day
+            <select id="taskDay"></select>
+          </label>
+          <label>
+            Time <span class="optional">(optional)</span>
+            <input type="time" id="taskTime" />
+          </label>
+        </div>
+        <div class="grid-2">
+          <label>
+            Assigned to
+            <select id="taskAssignee">
+              <option value="">Unassigned</option>
+            </select>
+          </label>
+          <label>
+            Status
+            <select id="taskStatus">
+              <option value="pending">Pending</option>
+              <option value="in-progress">In progress</option>
+              <option value="completed">Completed</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          Notes <span class="optional">(optional)</span>
+          <textarea id="taskNotes" rows="3" maxlength="500" placeholder="Details, links, location…"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="deleteTaskBtn" class="danger-btn" hidden>Delete</button>
+          <div class="modal-actions-right">
+            <button type="button" id="cancelTaskBtn" class="ghost-btn">Cancel</button>
+            <button type="submit" class="primary-btn">Save activity</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Members modal -->
+  <div class="modal-backdrop" id="membersModalBackdrop">
+    <div class="modal">
+      <h2>Team members</h2>
+      <form id="addMemberForm" class="inline-form">
+        <input type="text" id="newMemberName" placeholder="Add a team member" maxlength="60" required />
+        <button type="submit" class="primary-btn">Add</button>
+      </form>
+      <ul class="member-list" id="memberList"></ul>
+      <div class="modal-actions">
+        <div></div>
+        <div class="modal-actions-right">
+          <button type="button" id="closeMembersBtn" class="ghost-btn">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
