@@ -11,7 +11,9 @@
     "node": ">=18"
   },
   "dependencies": {
-    "express": "^4.19.2"
+    "@upstash/redis": "^1.38.2",
+    "express": "^4.19.2",
+    "twilio": "^6.0.2"
   },
   "license": "UNLICENSED",
   "private": true

@@ -1,6 +1,38 @@
 {
   "members": [
-    { "id": "m-founder", "name": "Team Member", "color": "#6C5CE7" }
+    {
+      "id": "m-founder",
+      "name": "Team Member",
+      "color": "#6C5CE7"
+    },
+    {
+      "id": "m-4de7da2abf08",
+      "name": "Screw",
+      "color": "#00B894"
+    },
+    {
+      "id": "m-9050400a1ec1",
+      "name": "Siks",
+      "color": "#0984E3"
+    },
+    {
+      "id": "m-bf33865f98ae",
+      "name": "Priviledge",
+      "color": "#E17055"
+    }
   ],
-  "tasks": []
+  "tasks": [
+    {
+      "id": "t-d8ec42376e90",
+      "title": "Check in With Drones for Africa",
+      "notes": "",
+      "time": "13:00",
+      "day": 0,
+      "weekStart": "2026-08-09",
+      "assigneeId": "m-founder",
+      "status": "in-progress",
+      "createdAt": "2026-08-10T10:47:33.345Z",
+      "updatedAt": "2026-08-10T18:50:05.281Z"
+    }
+  ]
 }

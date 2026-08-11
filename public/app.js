@@ -2,6 +2,8 @@
   const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const STATUS_ORDER = ['pending', 'in-progress', 'completed'];
   const STATUS_LABEL = { pending: 'Pending', 'in-progress': 'In progress', completed: 'Completed' };
+  const STATUS_BTN_LABEL = { pending: 'Pending', 'in-progress': 'Doing', completed: 'Done' };
+  const WEEKS_AHEAD = 4;
 
   let state = { members: [], tasks: [] };
   let currentWeekStart = mondayOf(new Date());
@@ -33,8 +35,8 @@
     return d;
   }
 
-  function formatWeekLabel(weekStart) {
-    const end = addDays(weekStart, 6);
+  function formatWeekLabel(weekStart, weeks = 1) {
+    const end = addDays(weekStart, weeks * 7 - 1);
     const opts = { month: 'short', day: 'numeric' };
     return `${weekStart.toLocaleDateString(undefined, opts)} – ${end.toLocaleDateString(undefined, opts)}`;
   }
@@ -91,7 +93,7 @@
   }
 
   function renderWeekLabel() {
-    el('weekLabel').textContent = formatWeekLabel(currentWeekStart);
+    el('weekLabel').textContent = formatWeekLabel(currentWeekStart, WEEKS_AHEAD);
   }
 
   function renderUserSelect() {
@@ -140,49 +142,76 @@
     return tasks.filter((t) => t.assigneeId && activeFilters.has(t.assigneeId));
   }
 
+  function tasksForWeek(weekStartISO) {
+    const tasks = state.tasks.filter((t) => t.weekStart === weekStartISO);
+    if (!activeFilters.size) return tasks;
+    return tasks.filter((t) => t.assigneeId && activeFilters.has(t.assigneeId));
+  }
+
   function renderBoard() {
-    const tasks = visibleWeekTasks();
     const today = new Date();
 
-    board.innerHTML = DAY_NAMES.map((name, dayIndex) => {
-      const date = addDays(currentWeekStart, dayIndex);
-      const dayTasks = tasks
-        .filter((t) => t.day === dayIndex)
-        .sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
+    board.innerHTML = Array.from({ length: WEEKS_AHEAD }, (_, w) => {
+      const weekStart = addDays(currentWeekStart, w * 7);
+      const weekStartISO = isoDate(weekStart);
+      const tasks = tasksForWeek(weekStartISO);
 
-      const cards = dayTasks.map(renderTaskCard).join('') ||
-        '<div class="empty-state">No activities</div>';
+      const dayColumns = DAY_NAMES.map((name, dayIndex) => {
+        const date = addDays(weekStart, dayIndex);
+        const dayTasks = tasks
+          .filter((t) => t.day === dayIndex)
+          .sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
+
+        const cards = dayTasks.map(renderTaskCard).join('') ||
+          '<div class="empty-state">No activities</div>';
+
+        return `
+          <div class="day-column ${isSameDay(date, today) ? 'is-today' : ''}">
+            <div class="day-header">
+              <div class="day-name">${name}</div>
+              <div class="day-date">${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</div>
+            </div>
+            <div class="day-tasks" data-day="${dayIndex}" data-week="${weekStartISO}">${cards}</div>
+            <button type="button" class="add-task-inline" data-day="${dayIndex}" data-week="${weekStartISO}">+ Add activity</button>
+          </div>`;
+      }).join('');
 
       return `
-        <div class="day-column ${isSameDay(date, today) ? 'is-today' : ''}">
-          <div class="day-header">
-            <div class="day-name">${name}</div>
-            <div class="day-date">${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</div>
-          </div>
-          <div class="day-tasks" data-day="${dayIndex}">${cards}</div>
-          <button type="button" class="add-task-inline" data-day="${dayIndex}">+ Add activity</button>
-        </div>`;
+        <section class="week-block">
+          <h2 class="week-block-label">
+            ${formatWeekLabel(weekStart)}
+            ${w === 0 ? '<span class="week-block-tag">This week</span>' : ''}
+          </h2>
+          <div class="board">${dayColumns}</div>
+        </section>`;
     }).join('');
 
     board.querySelectorAll('.add-task-inline').forEach((btn) => {
-      btn.addEventListener('click', () => openTaskModal({ day: Number(btn.dataset.day) }));
+      btn.addEventListener('click', () =>
+        openTaskModal({ day: Number(btn.dataset.day), weekStart: btn.dataset.week })
+      );
     });
     board.querySelectorAll('.task-card').forEach((card) => {
       card.addEventListener('click', (e) => {
-        if (e.target.closest('.status-pill')) return;
+        if (e.target.closest('.status-buttons')) return;
         openTaskModal(state.tasks.find((t) => t.id === card.dataset.id));
       });
     });
-    board.querySelectorAll('.status-pill').forEach((pill) => {
-      pill.addEventListener('click', (e) => {
+    board.querySelectorAll('.status-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        cycleStatus(pill.dataset.id);
+        setStatus(btn.dataset.id, btn.dataset.status);
       });
     });
   }
 
   function renderTaskCard(task) {
     const member = state.members.find((m) => m.id === task.assigneeId);
+    const statusButtons = STATUS_ORDER.map(
+      (s) => `
+        <button type="button" class="status-btn status-${s} ${task.status === s ? 'active' : ''}"
+          data-id="${task.id}" data-status="${s}" title="Mark as ${STATUS_LABEL[s]}">${STATUS_BTN_LABEL[s]}</button>`
+    ).join('');
     return `
       <div class="task-card status-${task.status}" data-id="${task.id}">
         <div class="task-top">
@@ -195,10 +224,8 @@
           ${member
             ? `<span class="assignee-chip"><span class="assignee-dot" style="background:${member.color}"></span>${escapeHtml(member.name)}</span>`
             : '<span class="assignee-chip">Unassigned</span>'}
-          <button type="button" class="status-pill status-${task.status}" data-id="${task.id}" title="Click to change status">
-            ${STATUS_LABEL[task.status]}
-          </button>
         </div>
+        <div class="status-buttons">${statusButtons}</div>
       </div>`;
   }
 
@@ -222,6 +249,7 @@
         (m) => `
         <li>
           <span class="member-name"><span class="chip-dot" style="background:${m.color}"></span>${escapeHtml(m.name)}</span>
+          <input type="tel" class="member-phone-input" data-id="${m.id}" placeholder="+14155552671 (WhatsApp)" value="${escapeHtml(m.phone || '')}" />
           <button type="button" class="remove-member" data-id="${m.id}" title="Remove member">&times;</button>
         </li>`
       )
@@ -231,6 +259,24 @@
         if (!confirm('Remove this member? Their assigned activities will become unassigned.')) return;
         await api(`/api/members/${btn.dataset.id}`, { method: 'DELETE' });
         await loadState();
+      });
+    });
+    list.querySelectorAll('.member-phone-input').forEach((input) => {
+      input.addEventListener('change', async () => {
+        const memberId = input.dataset.id;
+        const prev = state.members.find((m) => m.id === memberId)?.phone || '';
+        try {
+          const updated = await api(`/api/members/${memberId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ phone: input.value.trim() }),
+          });
+          const member = state.members.find((m) => m.id === memberId);
+          if (member) member.phone = updated.phone;
+          showToast(updated.phone ? `Saved WhatsApp number for ${updated.name}` : `Removed WhatsApp number for ${updated.name}`);
+        } catch (err) {
+          input.value = prev;
+          showToast(err.message);
+        }
       });
     });
   }
@@ -262,7 +308,11 @@
       state.members.map((m) => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
     assigneeSelect.value = (task && task.assigneeId) || getCurrentUserId() || '';
 
+    el('taskWeekStart').value = (task && task.weekStart) || isoDate(currentWeekStart);
+
     el('deleteTaskBtn').hidden = !editingTaskId;
+    const assignee = task && state.members.find((m) => m.id === task.assigneeId);
+    el('notifyTaskBtn').hidden = !editingTaskId || !assignee || !assignee.phone;
     el('taskModalBackdrop').classList.add('open');
     el('taskTitle').focus();
   }
@@ -272,17 +322,18 @@
     editingTaskId = null;
   }
 
-  async function cycleStatus(taskId) {
+  async function setStatus(taskId, status) {
     const task = state.tasks.find((t) => t.id === taskId);
-    if (!task) return;
-    const next = STATUS_ORDER[(STATUS_ORDER.indexOf(task.status) + 1) % STATUS_ORDER.length];
-    task.status = next; // optimistic
+    if (!task || task.status === status) return;
+    const prev = task.status;
+    task.status = status; // optimistic
     renderBoard();
     renderProgress();
     try {
-      await api(`/api/tasks/${taskId}/status`, { method: 'PATCH', body: JSON.stringify({ status: next }) });
-      showToast(`Marked "${task.title}" as ${STATUS_LABEL[next].toLowerCase()}`);
+      await api(`/api/tasks/${taskId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+      showToast(`Marked "${task.title}" as ${STATUS_LABEL[status].toLowerCase()}`);
     } catch (err) {
+      task.status = prev;
       showToast(err.message);
       await loadState();
     }
@@ -295,7 +346,7 @@
       notes: el('taskNotes').value,
       time: el('taskTime').value,
       day: Number(el('taskDay').value),
-      weekStart: isoDate(currentWeekStart),
+      weekStart: el('taskWeekStart').value || isoDate(currentWeekStart),
       assigneeId: el('taskAssignee').value || null,
       status: el('taskStatus').value,
     };
@@ -327,6 +378,16 @@
     }
   });
 
+  el('notifyTaskBtn').addEventListener('click', async () => {
+    if (!editingTaskId) return;
+    try {
+      await api(`/api/tasks/${editingTaskId}/notify`, { method: 'POST' });
+      showToast('WhatsApp reminder sent');
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+
   el('cancelTaskBtn').addEventListener('click', closeTaskModal);
   el('taskModalBackdrop').addEventListener('click', (e) => {
     if (e.target === el('taskModalBackdrop')) closeTaskModal();
@@ -344,11 +405,16 @@
   el('addMemberForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const input = el('newMemberName');
+    const phoneInput = el('newMemberPhone');
     const name = input.value.trim();
     if (!name) return;
     try {
-      const member = await api('/api/members', { method: 'POST', body: JSON.stringify({ name }) });
+      const member = await api('/api/members', {
+        method: 'POST',
+        body: JSON.stringify({ name, phone: phoneInput.value.trim() }),
+      });
       input.value = '';
+      phoneInput.value = '';
       await loadState();
       if (!localStorage.getItem('ff-current-user')) {
         localStorage.setItem('ff-current-user', member.id);

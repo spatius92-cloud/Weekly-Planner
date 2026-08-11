@@ -1,31 +1,15 @@
 const express = require('express');
-const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
+const { readDB, writeDB } = require('./lib/db');
+const { sendWhatsApp } = require('./lib/notify');
+const { assignedMessage, statusChangedMessage, reminderMessage, digestMessage } = require('./lib/messages');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DB_PATH = path.join(__dirname, 'data', 'db.json');
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
-
-// --- tiny file-based "database" ------------------------------------------
-// Writes are serialized through a promise chain so concurrent requests never
-// clobber each other's changes.
-let writeQueue = Promise.resolve();
-
-async function readDB() {
-  const raw = await fs.readFile(DB_PATH, 'utf-8');
-  return JSON.parse(raw);
-}
-
-function writeDB(db) {
-  writeQueue = writeQueue.then(() =>
-    fs.writeFile(DB_PATH, JSON.stringify(db, null, 2))
-  );
-  return writeQueue;
-}
 
 function id(prefix) {
   return `${prefix}-${crypto.randomBytes(6).toString('hex')}`;
@@ -33,6 +17,11 @@ function id(prefix) {
 
 const STATUSES = ['pending', 'in-progress', 'completed'];
 const COLORS = ['#6C5CE7', '#00B894', '#0984E3', '#E17055', '#FDCB6E', '#E84393', '#00CEC9', '#D63031'];
+const PHONE_RE = /^\+[1-9]\d{7,14}$/; // E.164, e.g. +14155552671
+
+function isValidPhone(phone) {
+  return PHONE_RE.test(phone);
+}
 
 // --- members ---------------------------------------------------------------
 
@@ -47,7 +36,11 @@ app.get('/api/state', async (req, res) => {
 
 app.post('/api/members', async (req, res) => {
   const name = (req.body.name || '').trim();
+  const phone = (req.body.phone || '').trim();
   if (!name) return res.status(400).json({ error: 'Member name is required.' });
+  if (phone && !isValidPhone(phone)) {
+    return res.status(400).json({ error: 'WhatsApp number must be in international format, e.g. +14155552671.' });
+  }
 
   const db = await readDB();
   if (db.members.some((m) => m.name.toLowerCase() === name.toLowerCase())) {
@@ -56,11 +49,34 @@ app.post('/api/members', async (req, res) => {
   const member = {
     id: id('m'),
     name,
+    phone,
     color: COLORS[db.members.length % COLORS.length],
   };
   db.members.push(member);
   await writeDB(db);
   res.status(201).json(member);
+});
+
+app.patch('/api/members/:id', async (req, res) => {
+  const db = await readDB();
+  const member = db.members.find((m) => m.id === req.params.id);
+  if (!member) return res.status(404).json({ error: 'Member not found.' });
+
+  if (req.body.phone !== undefined) {
+    const phone = (req.body.phone || '').trim();
+    if (phone && !isValidPhone(phone)) {
+      return res.status(400).json({ error: 'WhatsApp number must be in international format, e.g. +14155552671.' });
+    }
+    member.phone = phone;
+  }
+  if (req.body.name !== undefined) {
+    const name = req.body.name.trim();
+    if (!name) return res.status(400).json({ error: 'Member name cannot be empty.' });
+    member.name = name;
+  }
+
+  await writeDB(db);
+  res.json(member);
 });
 
 app.delete('/api/members/:id', async (req, res) => {
@@ -103,6 +119,12 @@ app.post('/api/tasks', async (req, res) => {
   };
   db.tasks.push(task);
   await writeDB(db);
+
+  if (task.assigneeId) {
+    const member = db.members.find((m) => m.id === task.assigneeId);
+    if (member) sendWhatsApp(member.phone, assignedMessage(member, task));
+  }
+
   res.status(201).json(task);
 });
 
@@ -110,6 +132,9 @@ app.put('/api/tasks/:id', async (req, res) => {
   const db = await readDB();
   const task = db.tasks.find((t) => t.id === req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found.' });
+
+  const prevAssigneeId = task.assigneeId;
+  const prevStatus = task.status;
 
   const { title, notes, day, weekStart, assigneeId, status, time } = req.body;
   if (title !== undefined) {
@@ -133,6 +158,16 @@ app.put('/api/tasks/:id', async (req, res) => {
   task.updatedAt = new Date().toISOString();
 
   await writeDB(db);
+
+  // Notify: reassignment takes priority over a same-request status change.
+  if (task.assigneeId && task.assigneeId !== prevAssigneeId) {
+    const member = db.members.find((m) => m.id === task.assigneeId);
+    if (member) sendWhatsApp(member.phone, assignedMessage(member, task));
+  } else if (task.status !== prevStatus && task.assigneeId) {
+    const member = db.members.find((m) => m.id === task.assigneeId);
+    if (member) sendWhatsApp(member.phone, statusChangedMessage(member, task));
+  }
+
   res.json(task);
 });
 
@@ -144,10 +179,38 @@ app.patch('/api/tasks/:id/status', async (req, res) => {
   const task = db.tasks.find((t) => t.id === req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found.' });
 
+  const changed = task.status !== status;
   task.status = status;
   task.updatedAt = new Date().toISOString();
   await writeDB(db);
+
+  if (changed && task.assigneeId) {
+    const member = db.members.find((m) => m.id === task.assigneeId);
+    if (member) sendWhatsApp(member.phone, statusChangedMessage(member, task));
+  }
+
   res.json(task);
+});
+
+app.post('/api/tasks/:id/notify', async (req, res) => {
+  const db = await readDB();
+  const task = db.tasks.find((t) => t.id === req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found.' });
+  if (!task.assigneeId) return res.status(400).json({ error: 'This activity is unassigned — nothing to notify.' });
+
+  const member = db.members.find((m) => m.id === task.assigneeId);
+  if (!member) return res.status(400).json({ error: 'Assignee not found.' });
+  if (!member.phone) return res.status(400).json({ error: `${member.name} doesn't have a WhatsApp number on file.` });
+
+  const result = await sendWhatsApp(member.phone, reminderMessage(member, task));
+  if (!result.sent) {
+    const message =
+      result.reason === 'not_configured'
+        ? 'WhatsApp isn’t configured on the server yet (missing Twilio credentials).'
+        : result.message || 'Failed to send WhatsApp message.';
+    return res.status(502).json({ error: message });
+  }
+  res.json({ sent: true });
 });
 
 app.delete('/api/tasks/:id', async (req, res) => {
@@ -160,6 +223,64 @@ app.delete('/api/tasks/:id', async (req, res) => {
   res.status(204).end();
 });
 
-app.listen(PORT, () => {
-  console.log(`Frame & Frqnc Weekly Planner running at http://localhost:${PORT}`);
+// --- scheduled digests -------------------------------------------------
+// Triggered by Vercel Cron (see vercel.json). Guarded by CRON_SECRET when set
+// — Vercel signs cron requests with `Authorization: Bearer <CRON_SECRET>`.
+
+function isAuthorizedCron(req) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return true; // no secret configured — allow (e.g. manual testing)
+  return req.get('authorization') === `Bearer ${secret}`;
+}
+
+function currentMondayISO() {
+  const d = new Date();
+  const day = d.getUTCDay(); // 0 = Sun
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + diff);
+  d.setUTCHours(0, 0, 0, 0);
+  return d.toISOString().slice(0, 10);
+}
+
+app.get('/api/cron/daily-digest', async (req, res) => {
+  if (!isAuthorizedCron(req)) return res.status(401).end();
+
+  const db = await readDB();
+  const weekStart = currentMondayISO();
+  const todayIndex = (new Date().getUTCDay() + 6) % 7; // 0 = Mon .. 6 = Sun
+
+  const results = [];
+  for (const member of db.members) {
+    if (!member.phone) continue;
+    const tasks = db.tasks.filter(
+      (t) => t.assigneeId === member.id && t.weekStart === weekStart && t.day === todayIndex
+    );
+    const result = await sendWhatsApp(member.phone, digestMessage(member, tasks, { weekly: false }));
+    results.push({ member: member.name, ...result });
+  }
+  res.json({ sent: results.length, results });
 });
+
+app.get('/api/cron/weekly-digest', async (req, res) => {
+  if (!isAuthorizedCron(req)) return res.status(401).end();
+
+  const db = await readDB();
+  const weekStart = currentMondayISO();
+
+  const results = [];
+  for (const member of db.members) {
+    if (!member.phone) continue;
+    const tasks = db.tasks.filter((t) => t.assigneeId === member.id && t.weekStart === weekStart);
+    const result = await sendWhatsApp(member.phone, digestMessage(member, tasks, { weekly: true }));
+    results.push({ member: member.name, ...result });
+  }
+  res.json({ sent: results.length, results });
+});
+
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Frame & Frqnc Weekly Planner running at http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;

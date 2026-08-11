@@ -39,8 +39,8 @@
     </div>
   </section>
 
-  <main class="board" id="board">
-    <!-- 7 day columns injected by app.js -->
+  <main class="weeks-view" id="board">
+    <!-- week blocks (each a 7-day board) injected by app.js -->
   </main>
 
   <!-- Task modal -->
@@ -49,6 +49,7 @@
       <h2 id="taskModalTitle">Add activity</h2>
       <form id="taskForm">
         <input type="hidden" id="taskId" />
+        <input type="hidden" id="taskWeekStart" />
         <label>
           Title
           <input type="text" id="taskTitle" required maxlength="120" placeholder="e.g. Client shoot — downtown loft" />
@@ -84,7 +85,10 @@
           <textarea id="taskNotes" rows="3" maxlength="500" placeholder="Details, links, location…"></textarea>
         </label>
         <div class="modal-actions">
-          <button type="button" id="deleteTaskBtn" class="danger-btn" hidden>Delete</button>
+          <div class="modal-actions-left">
+            <button type="button" id="deleteTaskBtn" class="danger-btn" hidden>Delete</button>
+            <button type="button" id="notifyTaskBtn" class="ghost-btn" hidden>Send WhatsApp reminder</button>
+          </div>
           <div class="modal-actions-right">
             <button type="button" id="cancelTaskBtn" class="ghost-btn">Cancel</button>
             <button type="submit" class="primary-btn">Save activity</button>
@@ -98,8 +102,10 @@
   <div class="modal-backdrop" id="membersModalBackdrop">
     <div class="modal">
       <h2>Team members</h2>
+      <p class="hint">Add a WhatsApp number (international format, e.g. +14155552671) to notify a member about their activities.</p>
       <form id="addMemberForm" class="inline-form">
-        <input type="text" id="newMemberName" placeholder="Add a team member" maxlength="60" required />
+        <input type="text" id="newMemberName" placeholder="Name" maxlength="60" required />
+        <input type="tel" id="newMemberPhone" placeholder="+14155552671" />
         <button type="submit" class="primary-btn">Add</button>
       </form>
       <ul class="member-list" id="memberList"></ul>
