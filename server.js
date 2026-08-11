@@ -1,9 +1,23 @@
+try {
+  require('dotenv').config(); // local dev convenience; no-op in production / when .env is absent
+} catch (_) {}
+
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const { readDB, writeDB } = require('./lib/db');
 const { sendWhatsApp } = require('./lib/notify');
-const { assignedMessage, statusChangedMessage, reminderMessage, digestMessage } = require('./lib/messages');
+const { sendPush } = require('./lib/push');
+const {
+  assignedMessage,
+  statusChangedMessage,
+  reminderMessage,
+  digestMessage,
+  pushAssigned,
+  pushStatusChanged,
+  pushReminder,
+  pushDigest,
+} = require('./lib/messages');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,6 +35,26 @@ const PHONE_RE = /^\+[1-9]\d{7,14}$/; // E.164, e.g. +14155552671
 
 function isValidPhone(phone) {
   return PHONE_RE.test(phone);
+}
+
+// --- browser push helpers ---------------------------------------------------
+
+function memberSubscriptions(db, memberId) {
+  return db.pushSubscriptions.filter((s) => s.memberId === memberId);
+}
+
+// Sends to every device subscribed for that member; returns the endpoints
+// that turned out to be dead so the caller can prune them.
+async function pushToMember(db, memberId, payload) {
+  const subs = memberSubscriptions(db, memberId);
+  const dead = [];
+  await Promise.all(
+    subs.map(async (sub) => {
+      const result = await sendPush(sub, payload);
+      if (result.expired) dead.push(sub.endpoint);
+    })
+  );
+  return dead;
 }
 
 // --- members ---------------------------------------------------------------
@@ -55,6 +89,40 @@ app.post('/api/members', async (req, res) => {
   db.members.push(member);
   await writeDB(db);
   res.status(201).json(member);
+});
+
+// --- push subscriptions ------------------------------------------------
+
+app.get('/api/push/vapid-public-key', (req, res) => {
+  res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || null });
+});
+
+app.post('/api/push/subscribe', async (req, res) => {
+  const { subscription, memberId } = req.body;
+  if (!subscription || !subscription.endpoint || !subscription.keys) {
+    return res.status(400).json({ error: 'A valid push subscription is required.' });
+  }
+
+  const db = await readDB();
+  db.pushSubscriptions = db.pushSubscriptions.filter((s) => s.endpoint !== subscription.endpoint);
+  db.pushSubscriptions.push({
+    endpoint: subscription.endpoint,
+    keys: subscription.keys,
+    memberId: memberId || null,
+    createdAt: new Date().toISOString(),
+  });
+  await writeDB(db);
+  res.status(201).json({ subscribed: true });
+});
+
+app.post('/api/push/unsubscribe', async (req, res) => {
+  const { endpoint } = req.body;
+  if (!endpoint) return res.status(400).json({ error: 'endpoint is required.' });
+
+  const db = await readDB();
+  db.pushSubscriptions = db.pushSubscriptions.filter((s) => s.endpoint !== endpoint);
+  await writeDB(db);
+  res.json({ subscribed: false });
 });
 
 app.patch('/api/members/:id', async (req, res) => {
@@ -123,6 +191,7 @@ app.post('/api/tasks', async (req, res) => {
   if (task.assigneeId) {
     const member = db.members.find((m) => m.id === task.assigneeId);
     if (member) sendWhatsApp(member.phone, assignedMessage(member, task));
+    pushToMember(db, task.assigneeId, pushAssigned(task));
   }
 
   res.status(201).json(task);
@@ -163,9 +232,11 @@ app.put('/api/tasks/:id', async (req, res) => {
   if (task.assigneeId && task.assigneeId !== prevAssigneeId) {
     const member = db.members.find((m) => m.id === task.assigneeId);
     if (member) sendWhatsApp(member.phone, assignedMessage(member, task));
+    pushToMember(db, task.assigneeId, pushAssigned(task));
   } else if (task.status !== prevStatus && task.assigneeId) {
     const member = db.members.find((m) => m.id === task.assigneeId);
     if (member) sendWhatsApp(member.phone, statusChangedMessage(member, task));
+    pushToMember(db, task.assigneeId, pushStatusChanged(task));
   }
 
   res.json(task);
@@ -187,6 +258,7 @@ app.patch('/api/tasks/:id/status', async (req, res) => {
   if (changed && task.assigneeId) {
     const member = db.members.find((m) => m.id === task.assigneeId);
     if (member) sendWhatsApp(member.phone, statusChangedMessage(member, task));
+    pushToMember(db, task.assigneeId, pushStatusChanged(task));
   }
 
   res.json(task);
@@ -200,17 +272,28 @@ app.post('/api/tasks/:id/notify', async (req, res) => {
 
   const member = db.members.find((m) => m.id === task.assigneeId);
   if (!member) return res.status(400).json({ error: 'Assignee not found.' });
-  if (!member.phone) return res.status(400).json({ error: `${member.name} doesn't have a WhatsApp number on file.` });
 
-  const result = await sendWhatsApp(member.phone, reminderMessage(member, task));
-  if (!result.sent) {
-    const message =
-      result.reason === 'not_configured'
-        ? 'WhatsApp isn’t configured on the server yet (missing Twilio credentials).'
-        : result.message || 'Failed to send WhatsApp message.';
+  const subs = memberSubscriptions(db, member.id);
+  const [whatsappResult, pushResults] = await Promise.all([
+    member.phone ? sendWhatsApp(member.phone, reminderMessage(member, task)) : Promise.resolve(null),
+    Promise.all(subs.map((sub) => sendPush(sub, pushReminder(task)))),
+  ]);
+
+  const pushSentCount = pushResults.filter((r) => r.sent).length;
+  const deadEndpoints = subs.filter((s, i) => pushResults[i].expired).map((s) => s.endpoint);
+  if (deadEndpoints.length) {
+    db.pushSubscriptions = db.pushSubscriptions.filter((s) => !deadEndpoints.includes(s.endpoint));
+    await writeDB(db);
+  }
+
+  const whatsappSent = Boolean(whatsappResult && whatsappResult.sent);
+  if (!whatsappSent && !pushSentCount) {
+    const message = subs.length || member.phone
+      ? 'Failed to send the reminder — the notification service reported an error.'
+      : `${member.name} has no WhatsApp number and no device subscribed to notifications.`;
     return res.status(502).json({ error: message });
   }
-  res.json({ sent: true });
+  res.json({ sent: true, whatsapp: whatsappSent, push: pushSentCount });
 });
 
 app.delete('/api/tasks/:id', async (req, res) => {
@@ -242,6 +325,36 @@ function currentMondayISO() {
   return d.toISOString().slice(0, 10);
 }
 
+async function runDigest(db, weekStart, { weekly, todayIndex }) {
+  const results = [];
+  const deadEndpoints = [];
+
+  for (const member of db.members) {
+    const subs = memberSubscriptions(db, member.id);
+    if (!member.phone && !subs.length) continue;
+
+    const tasks = db.tasks.filter(
+      (t) => t.assigneeId === member.id && t.weekStart === weekStart && (weekly || t.day === todayIndex)
+    );
+
+    if (member.phone) {
+      const result = await sendWhatsApp(member.phone, digestMessage(member, tasks, { weekly }));
+      results.push({ member: member.name, channel: 'whatsapp', ...result });
+    }
+    if (subs.length) {
+      const dead = await pushToMember(db, member.id, pushDigest(tasks, { weekly }));
+      deadEndpoints.push(...dead);
+      results.push({ member: member.name, channel: 'push', sent: subs.length - dead.length });
+    }
+  }
+
+  if (deadEndpoints.length) {
+    db.pushSubscriptions = db.pushSubscriptions.filter((s) => !deadEndpoints.includes(s.endpoint));
+    await writeDB(db);
+  }
+  return results;
+}
+
 app.get('/api/cron/daily-digest', async (req, res) => {
   if (!isAuthorizedCron(req)) return res.status(401).end();
 
@@ -249,15 +362,7 @@ app.get('/api/cron/daily-digest', async (req, res) => {
   const weekStart = currentMondayISO();
   const todayIndex = (new Date().getUTCDay() + 6) % 7; // 0 = Mon .. 6 = Sun
 
-  const results = [];
-  for (const member of db.members) {
-    if (!member.phone) continue;
-    const tasks = db.tasks.filter(
-      (t) => t.assigneeId === member.id && t.weekStart === weekStart && t.day === todayIndex
-    );
-    const result = await sendWhatsApp(member.phone, digestMessage(member, tasks, { weekly: false }));
-    results.push({ member: member.name, ...result });
-  }
+  const results = await runDigest(db, weekStart, { weekly: false, todayIndex });
   res.json({ sent: results.length, results });
 });
 
@@ -267,13 +372,7 @@ app.get('/api/cron/weekly-digest', async (req, res) => {
   const db = await readDB();
   const weekStart = currentMondayISO();
 
-  const results = [];
-  for (const member of db.members) {
-    if (!member.phone) continue;
-    const tasks = db.tasks.filter((t) => t.assigneeId === member.id && t.weekStart === weekStart);
-    const result = await sendWhatsApp(member.phone, digestMessage(member, tasks, { weekly: true }));
-    results.push({ member: member.name, ...result });
-  }
+  const results = await runDigest(db, weekStart, { weekly: true });
   res.json({ sent: results.length, results });
 });
 

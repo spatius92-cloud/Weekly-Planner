@@ -34,5 +34,16 @@
       "createdAt": "2026-08-10T10:47:33.345Z",
       "updatedAt": "2026-08-10T18:50:05.281Z"
     }
+  ],
+  "pushSubscriptions": [
+    {
+      "endpoint": "https://fcm.googleapis.com/fcm/send/dIqW8dFaW_E:APA91bGBUYsMKliO6D-ZDeARDzweHHS2XwNbxJ2lmJts60wPHV2ZP50HNR9AC6BL2vYftwPAtJjPvV6MR1aZkMXGgdEiPxSu_A2ATtZyjBYmhrdXXj2TGsZkOuwkLi9M6RnQbcaxDHfN",
+      "keys": {
+        "p256dh": "BGxZ7WZsKnfII0-pbinmubCQDqKBmmg33aUxM9F3lf3dTnmh2y_X8fBgdbEAEGgch5jap3_IVg9-rxB9F5wYVVM",
+        "auth": "bU47wsXzBYHD1KGxkIQYrw"
+      },
+      "memberId": "m-founder",
+      "createdAt": "2026-08-11T10:56:37.208Z"
+    }
   ]
 }

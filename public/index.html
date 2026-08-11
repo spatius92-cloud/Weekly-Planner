@@ -26,6 +26,7 @@
     <div class="user-controls">
       <label class="sr-only" for="currentUser">You are</label>
       <select id="currentUser"></select>
+      <button id="notifyToggleBtn" class="ghost-btn" title="Get notifications on this device">🔔 Enable notifications</button>
       <button id="manageMembersBtn" class="ghost-btn">Team</button>
       <button id="addTaskBtn" class="primary-btn">+ Add activity</button>
     </div>
@@ -87,7 +88,7 @@
         <div class="modal-actions">
           <div class="modal-actions-left">
             <button type="button" id="deleteTaskBtn" class="danger-btn" hidden>Delete</button>
-            <button type="button" id="notifyTaskBtn" class="ghost-btn" hidden>Send WhatsApp reminder</button>
+            <button type="button" id="notifyTaskBtn" class="ghost-btn" hidden>Send reminder</button>
           </div>
           <div class="modal-actions-right">
             <button type="button" id="cancelTaskBtn" class="ghost-btn">Cancel</button>

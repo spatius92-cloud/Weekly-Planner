@@ -287,6 +287,91 @@
     return div.innerHTML;
   }
 
+  // ---------- push notifications ----------
+  // Subscribes *this device* to browser push, tied to whichever team member
+  // is currently selected. No phone number or third-party account needed —
+  // it talks directly to the browser's own push service.
+
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+  }
+
+  function pushSupported() {
+    return 'serviceWorker' in navigator && 'PushManager' in window;
+  }
+
+  async function getExistingSubscription() {
+    if (!pushSupported()) return null;
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return null;
+    return reg.pushManager.getSubscription();
+  }
+
+  async function enablePush() {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      showToast('Notifications were blocked — enable them in your browser settings to use this.');
+      return false;
+    }
+    const { publicKey } = await api('/api/push/vapid-public-key');
+    if (!publicKey) {
+      showToast('Push notifications aren’t configured on the server yet.');
+      return false;
+    }
+    let subscription = await reg.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+    }
+    await api('/api/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify({ subscription: subscription.toJSON(), memberId: getCurrentUserId() || null }),
+    });
+    return true;
+  }
+
+  async function disablePush() {
+    const subscription = await getExistingSubscription();
+    if (subscription) {
+      await api('/api/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: subscription.endpoint }) });
+      await subscription.unsubscribe();
+    }
+  }
+
+  async function refreshNotifyToggle() {
+    const btn = el('notifyToggleBtn');
+    if (!pushSupported()) {
+      btn.hidden = true;
+      return;
+    }
+    const subscription = await getExistingSubscription();
+    const subscribed = Boolean(subscription) && Notification.permission === 'granted';
+    btn.textContent = subscribed ? '🔔 Notifications on' : '🔔 Enable notifications';
+    btn.classList.toggle('active', subscribed);
+    btn.dataset.subscribed = subscribed ? '1' : '';
+  }
+
+  el('notifyToggleBtn').addEventListener('click', async () => {
+    try {
+      if (el('notifyToggleBtn').dataset.subscribed) {
+        await disablePush();
+        showToast('Notifications turned off for this device');
+      } else {
+        const ok = await enablePush();
+        if (ok) showToast('Notifications enabled on this device');
+      }
+    } catch (err) {
+      showToast(err.message || 'Could not update notification settings.');
+    }
+    refreshNotifyToggle();
+  });
+
   // ---------- task modal ----------
 
   function openTaskModal(task) {
@@ -312,7 +397,7 @@
 
     el('deleteTaskBtn').hidden = !editingTaskId;
     const assignee = task && state.members.find((m) => m.id === task.assigneeId);
-    el('notifyTaskBtn').hidden = !editingTaskId || !assignee || !assignee.phone;
+    el('notifyTaskBtn').hidden = !editingTaskId || !assignee;
     el('taskModalBackdrop').classList.add('open');
     el('taskTitle').focus();
   }
@@ -426,8 +511,16 @@
     }
   });
 
-  el('currentUser').addEventListener('change', (e) => {
+  el('currentUser').addEventListener('change', async (e) => {
     localStorage.setItem('ff-current-user', e.target.value);
+    // Re-tag this device's push subscription so it targets the newly selected member.
+    const subscription = await getExistingSubscription();
+    if (subscription) {
+      await api('/api/push/subscribe', {
+        method: 'POST',
+        body: JSON.stringify({ subscription: subscription.toJSON(), memberId: e.target.value || null }),
+      }).catch(() => {});
+    }
   });
 
   // ---------- week nav ----------
@@ -462,6 +555,12 @@
   }
 
   // ---------- init ----------
+
+  if (pushSupported()) {
+    navigator.serviceWorker.register('/sw.js').then(refreshNotifyToggle).catch(() => {});
+  } else {
+    el('notifyToggleBtn').hidden = true;
+  }
 
   loadState().catch((err) => showToast(err.message));
 })();
