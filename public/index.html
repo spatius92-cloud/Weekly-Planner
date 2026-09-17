@@ -27,6 +27,7 @@
       <label class="sr-only" for="currentUser">You are</label>
       <select id="currentUser"></select>
       <button id="notifyToggleBtn" class="ghost-btn" title="Get notifications on this device">🔔 Enable notifications</button>
+      <button id="exportPdfBtn" class="ghost-btn" title="Print or save a PDF report">Export PDF</button>
       <button id="manageMembersBtn" class="ghost-btn">Team</button>
       <button id="addTaskBtn" class="primary-btn">+ Add activity</button>
     </div>
@@ -93,6 +94,27 @@
           <div class="modal-actions-right">
             <button type="button" id="cancelTaskBtn" class="ghost-btn">Cancel</button>
             <button type="submit" class="primary-btn">Save activity</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Move activity modal -->
+  <div class="modal-backdrop" id="moveModalBackdrop">
+    <div class="modal">
+      <h2>Move activity</h2>
+      <p class="hint" id="moveTaskLabel"></p>
+      <form id="moveForm">
+        <label>
+          New date
+          <input type="date" id="moveDate" required />
+        </label>
+        <div class="modal-actions">
+          <div></div>
+          <div class="modal-actions-right">
+            <button type="button" id="cancelMoveBtn" class="ghost-btn">Cancel</button>
+            <button type="submit" class="primary-btn">Move activity</button>
           </div>
         </div>
       </form>

@@ -32,9 +32,16 @@ function id(prefix) {
 const STATUSES = ['pending', 'in-progress', 'completed'];
 const COLORS = ['#6C5CE7', '#00B894', '#0984E3', '#E17055', '#FDCB6E', '#E84393', '#00CEC9', '#D63031'];
 const PHONE_RE = /^\+[1-9]\d{7,14}$/; // E.164, e.g. +14155552671
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function isValidPhone(phone) {
   return PHONE_RE.test(phone);
+}
+
+function isValidISODate(value) {
+  if (typeof value !== 'string' || !ISO_DATE_RE.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 // --- browser push helpers ---------------------------------------------------
@@ -169,7 +176,7 @@ app.post('/api/tasks', async (req, res) => {
   if (typeof day !== 'number' || day < 0 || day > 6) {
     return res.status(400).json({ error: 'day must be 0 (Mon) through 6 (Sun).' });
   }
-  if (!weekStart) return res.status(400).json({ error: 'weekStart (ISO date) is required.' });
+  if (!isValidISODate(weekStart)) return res.status(400).json({ error: 'weekStart must be a valid ISO date (YYYY-MM-DD).' });
 
   const db = await readDB();
   const now = new Date().toISOString();
@@ -218,7 +225,10 @@ app.put('/api/tasks/:id', async (req, res) => {
     }
     task.day = day;
   }
-  if (weekStart !== undefined) task.weekStart = weekStart;
+  if (weekStart !== undefined) {
+    if (!isValidISODate(weekStart)) return res.status(400).json({ error: 'weekStart must be a valid ISO date (YYYY-MM-DD).' });
+    task.weekStart = weekStart;
+  }
   if (assigneeId !== undefined) task.assigneeId = assigneeId;
   if (status !== undefined) {
     if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status.' });

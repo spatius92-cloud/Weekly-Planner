@@ -36,10 +36,13 @@ approach.
 - Add, edit, and delete activities (title, day, time, notes, assignee, status).
 - Click an activity's status pill to cycle **Pending → In progress →
   Completed**.
+- Move any pending or in-progress activity to a new date without recreating it.
 - Team member management (add/remove teammates); each member gets an
   assignable color.
 - Filter the board by team member.
 - Per-week completion progress bar.
+- Export a four-week activity summary to the browser's print dialog for PDF saving.
+- Free browser notifications: background push when configured, with local reminders as a fallback while the planner is open.
 - Data is stored server-side (`data/db.json`) so every teammate sees the
   same board — nothing lives only in one person's browser.
 
