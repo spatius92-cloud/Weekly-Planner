@@ -507,8 +507,7 @@
     el('taskWeekStart').value = (task && task.weekStart) || isoDate(currentWeekStart);
 
     el('deleteTaskBtn').hidden = !editingTaskId;
-    const assignee = task && state.members.find((m) => m.id === task.assigneeId);
-    el('notifyTaskBtn').hidden = !editingTaskId || !assignee;
+    el('notifyTaskBtn').hidden = !editingTaskId;
     el('taskModalBackdrop').classList.add('open');
     el('taskTitle').focus();
   }
@@ -592,7 +591,7 @@
     if (!editingTaskId) return;
     try {
       await api(`/api/tasks/${editingTaskId}/notify`, { method: 'POST' });
-      showToast('WhatsApp reminder sent');
+      showToast('Reminder sent to the team');
     } catch (err) {
       showToast(err.message);
     }

@@ -6,7 +6,7 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const { readDB, writeDB } = require('./lib/db');
-const { sendWhatsApp } = require('./lib/notify');
+const { sendWhatsApp, hasTwilio } = require('./lib/notify');
 const { sendPush } = require('./lib/push');
 const {
   assignedMessage,
@@ -283,32 +283,31 @@ app.post('/api/tasks/:id/notify', async (req, res) => {
   const db = await readDB();
   const task = db.tasks.find((t) => t.id === req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found.' });
-  if (!task.assigneeId) return res.status(400).json({ error: 'This activity is unassigned — nothing to notify.' });
-
-  const member = db.members.find((m) => m.id === task.assigneeId);
-  if (!member) return res.status(400).json({ error: 'Assignee not found.' });
-
-  const subs = memberSubscriptions(db, member.id);
-  const [whatsappResult, pushResults] = await Promise.all([
-    member.phone ? sendWhatsApp(member.phone, reminderMessage(member, task)) : Promise.resolve(null),
-    Promise.all(subs.map((sub) => sendPush(sub, pushReminder(task)))),
+  const membersWithPhones = db.members.filter((member) => member.phone);
+  const subscriptions = db.pushSubscriptions;
+  const [whatsappResults, pushResults] = await Promise.all([
+    Promise.all(membersWithPhones.map((member) => sendWhatsApp(member.phone, reminderMessage(member, task)))),
+    Promise.all(subscriptions.map((sub) => sendPush(sub, pushReminder(task)))),
   ]);
 
-  const pushSentCount = pushResults.filter((r) => r.sent).length;
-  const deadEndpoints = subs.filter((s, i) => pushResults[i].expired).map((s) => s.endpoint);
+  const whatsappSentCount = whatsappResults.filter((result) => result.sent).length;
+  const pushSentCount = pushResults.filter((result) => result.sent).length;
+  const deadEndpoints = subscriptions.filter((sub, i) => pushResults[i].expired).map((sub) => sub.endpoint);
   if (deadEndpoints.length) {
     db.pushSubscriptions = db.pushSubscriptions.filter((s) => !deadEndpoints.includes(s.endpoint));
     await writeDB(db);
   }
 
-  const whatsappSent = Boolean(whatsappResult && whatsappResult.sent);
-  if (!whatsappSent && !pushSentCount) {
-    const message = subs.length || member.phone
-      ? 'Failed to send the reminder — the notification service reported an error.'
-      : `${member.name} has no WhatsApp number and no device subscribed to notifications.`;
-    return res.status(502).json({ error: message });
+  if (!whatsappSentCount && !pushSentCount) {
+    if (!membersWithPhones.length && !subscriptions.length) {
+      return res.status(400).json({ error: 'No team member has a WhatsApp number or enabled browser notifications.' });
+    }
+    if (membersWithPhones.length && !hasTwilio && !subscriptions.length) {
+      return res.status(502).json({ error: 'WhatsApp delivery is not configured on the server. Enable browser notifications or configure a WhatsApp provider.' });
+    }
+    return res.status(502).json({ error: 'All notification deliveries failed. Check browser permissions and WhatsApp provider settings.' });
   }
-  res.json({ sent: true, whatsapp: whatsappSent, push: pushSentCount });
+  res.json({ sent: true, whatsapp: whatsappSentCount, push: pushSentCount, recipients: membersWithPhones.length + subscriptions.length });
 });
 
 app.delete('/api/tasks/:id', async (req, res) => {
