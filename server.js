@@ -38,6 +38,11 @@ function isValidPhone(phone) {
   return PHONE_RE.test(phone);
 }
 
+function normalizePhone(phone) {
+  const normalized = String(phone || '').trim().replace(/[\s()-]/g, '');
+  return /^\d{8}$/.test(normalized) ? `+267${normalized}` : normalized;
+}
+
 function isValidISODate(value) {
   if (typeof value !== 'string' || !ISO_DATE_RE.test(value)) return false;
   const date = new Date(`${value}T00:00:00Z`);
@@ -77,10 +82,10 @@ app.get('/api/state', async (req, res) => {
 
 app.post('/api/members', async (req, res) => {
   const name = (req.body.name || '').trim();
-  const phone = (req.body.phone || '').trim();
+  const phone = normalizePhone(req.body.phone);
   if (!name) return res.status(400).json({ error: 'Member name is required.' });
   if (phone && !isValidPhone(phone)) {
-    return res.status(400).json({ error: 'WhatsApp number must be in international format, e.g. +14155552671.' });
+    return res.status(400).json({ error: 'Use 8 Botswana digits, +267 followed by 8 digits, or another valid international number.' });
   }
 
   const db = await readDB();
@@ -138,9 +143,9 @@ app.patch('/api/members/:id', async (req, res) => {
   if (!member) return res.status(404).json({ error: 'Member not found.' });
 
   if (req.body.phone !== undefined) {
-    const phone = (req.body.phone || '').trim();
+    const phone = normalizePhone(req.body.phone);
     if (phone && !isValidPhone(phone)) {
-      return res.status(400).json({ error: 'WhatsApp number must be in international format, e.g. +14155552671.' });
+      return res.status(400).json({ error: 'Use 8 Botswana digits, +267 followed by 8 digits, or another valid international number.' });
     }
     member.phone = phone;
   }

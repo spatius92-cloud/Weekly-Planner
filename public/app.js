@@ -267,7 +267,7 @@
         (m) => `
         <li>
           <span class="member-name"><span class="chip-dot" style="background:${m.color}"></span>${escapeHtml(m.name)}</span>
-          <input type="tel" class="member-phone-input" data-id="${m.id}" placeholder="+14155552671 (WhatsApp)" value="${escapeHtml(m.phone || '')}" />
+          <input type="tel" class="member-phone-input" data-id="${m.id}" placeholder="71234567 or +26771234567" value="${escapeHtml(m.phone || '')}" />
           <button type="button" class="remove-member" data-id="${m.id}" title="Remove member">&times;</button>
         </li>`
       )
