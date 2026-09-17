@@ -55,12 +55,12 @@ npm install
 npm start
 ```
 
-Then open **http://localhost:3000** in a browser. Share that URL (or your
+Then open [http://localhost:3000](http://localhost:3000) in a browser. Share that URL (or your
 deployed URL) with the team so everyone works off the same planner.
 
 ## Project structure
 
-```
+```text
 server.js        Express server + REST API, persists to data/db.json
 data/db.json      Simple JSON "database" (members + tasks)
 public/           Front-end: index.html, styles.css, app.js
@@ -68,15 +68,15 @@ public/           Front-end: index.html, styles.css, app.js
 
 ## API
 
-| Method | Route                     | Description                       |
-|--------|---------------------------|------------------------------------|
-| GET    | `/api/state`               | Fetch all members and tasks       |
-| POST   | `/api/members`             | Add a team member `{ name }`      |
-| DELETE | `/api/members/:id`         | Remove a team member              |
-| POST   | `/api/tasks`                | Create an activity                |
-| PUT    | `/api/tasks/:id`            | Edit an activity                  |
-| PATCH  | `/api/tasks/:id/status`     | Update just the status            |
-| DELETE | `/api/tasks/:id`            | Delete an activity                |
+| Method | Route                     | Description                    |
+| ------ | -----                     | -----------                    |
+| GET    | `/api/state`              | Fetch all members and tasks    |
+| POST   | `/api/members`            | Add a team member `{ name }`   |
+| DELETE | `/api/members/:id`        | Remove a team member           |
+| POST   | `/api/tasks`              | Create an activity             |
+| PUT    | `/api/tasks/:id`          | Edit an activity               |
+| PATCH  | `/api/tasks/:id/status`   | Update just the status         |
+| DELETE | `/api/tasks/:id`          | Delete an activity             |
 
 ## Notes & next steps
 
