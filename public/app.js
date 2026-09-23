@@ -505,6 +505,10 @@
       state.members.map((m) => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
     assigneeSelect.value = (task && task.assigneeId) || getCurrentUserId() || '';
 
+    const notifyTarget = el('taskNotifyTarget');
+    notifyTarget.value = task && task.assigneeId ? 'assignee' : 'team';
+    if (!state.members.length) notifyTarget.value = 'team';
+
     el('taskWeekStart').value = (task && task.weekStart) || isoDate(currentWeekStart);
 
     el('deleteTaskBtn').hidden = !editingTaskId;
@@ -607,9 +611,13 @@
 
   el('notifyTaskBtn').addEventListener('click', async () => {
     if (!editingTaskId) return;
+    const target = el('taskNotifyTarget').value || 'team';
     try {
-      await api(`/api/tasks/${editingTaskId}/notify`, { method: 'POST' });
-      showToast('Reminder sent to the team');
+      await api(`/api/tasks/${editingTaskId}/notify`, {
+        method: 'POST',
+        body: JSON.stringify({ target }),
+      });
+      showToast(target === 'team' ? 'Reminder sent to all team contacts' : 'Reminder sent to the assigned contact');
     } catch (err) {
       showToast(err.message);
     }

@@ -283,8 +283,25 @@ app.post('/api/tasks/:id/notify', async (req, res) => {
   const db = await readDB();
   const task = db.tasks.find((t) => t.id === req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found.' });
-  const membersWithPhones = db.members.filter((member) => member.phone);
-  const subscriptions = db.pushSubscriptions;
+
+  const target = String(req.body?.target || 'team').toLowerCase();
+  const teamMembers = db.members.filter((member) => member.phone);
+  let membersWithPhones = teamMembers;
+  let subscriptions = db.pushSubscriptions;
+
+  if (target === 'assignee' || target === 'member' || target === 'selected') {
+    if (!task.assigneeId) {
+      return res.status(400).json({ error: 'No assignee is set for this task. Choose Team members instead.' });
+    }
+    membersWithPhones = teamMembers.filter((member) => member.id === task.assigneeId);
+    subscriptions = db.pushSubscriptions.filter((sub) => sub.memberId === task.assigneeId);
+  } else if (target === 'team' || target === 'all' || target === 'all-members' || target === 'team-members' || target === 'everyone') {
+    membersWithPhones = teamMembers;
+    subscriptions = db.pushSubscriptions;
+  } else {
+    return res.status(400).json({ error: 'Unknown notification target. Use team or assignee.' });
+  }
+
   const [whatsappResults, pushResults] = await Promise.all([
     Promise.all(membersWithPhones.map((member) => sendWhatsApp(member.phone, reminderMessage(member, task)))),
     Promise.all(subscriptions.map((sub) => sendPush(sub, pushReminder(task)))),
@@ -300,14 +317,14 @@ app.post('/api/tasks/:id/notify', async (req, res) => {
 
   if (!whatsappSentCount && !pushSentCount) {
     if (!membersWithPhones.length && !subscriptions.length) {
-      return res.status(400).json({ error: 'No team member has a WhatsApp number or enabled browser notifications.' });
+      return res.status(400).json({ error: 'No team member has a WhatsApp number or enabled browser notifications for the selected contact target.' });
     }
     if (membersWithPhones.length && !hasTwilio && !subscriptions.length) {
       return res.status(502).json({ error: 'WhatsApp delivery is not configured on the server. Enable browser notifications or configure a WhatsApp provider.' });
     }
     return res.status(502).json({ error: 'All notification deliveries failed. Check browser permissions and WhatsApp provider settings.' });
   }
-  res.json({ sent: true, whatsapp: whatsappSentCount, push: pushSentCount, recipients: membersWithPhones.length + subscriptions.length });
+  res.json({ sent: true, whatsapp: whatsappSentCount, push: pushSentCount, recipients: membersWithPhones.length + subscriptions.length, target });
 });
 
 app.delete('/api/tasks/:id', async (req, res) => {
