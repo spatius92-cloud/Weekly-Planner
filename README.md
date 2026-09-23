@@ -37,6 +37,7 @@ approach.
 - Click an activity's status pill to cycle **Pending → In progress →
   Completed**.
 - Move any pending or in-progress activity to a new date without recreating it.
+- Duplicate any activity to another date while keeping the original.
 - Team member management (add/remove teammates); each member gets an
   assignable color.
 - Filter the board by team member.

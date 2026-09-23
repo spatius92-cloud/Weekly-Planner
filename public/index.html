@@ -90,6 +90,7 @@
           <div class="modal-actions-left">
             <button type="button" id="deleteTaskBtn" class="danger-btn" hidden>Delete</button>
             <button type="button" id="notifyTaskBtn" class="ghost-btn" hidden>Remind team</button>
+            <button type="button" id="duplicateTaskBtn" class="ghost-btn" hidden>Duplicate</button>
           </div>
           <div class="modal-actions-right">
             <button type="button" id="cancelTaskBtn" class="ghost-btn">Cancel</button>
@@ -103,7 +104,7 @@
   <!-- Move activity modal -->
   <div class="modal-backdrop" id="moveModalBackdrop">
     <div class="modal">
-      <h2>Move activity</h2>
+      <h2 id="moveModalTitle">Move activity</h2>
       <p class="hint" id="moveTaskLabel"></p>
       <form id="moveForm">
         <label>
@@ -114,7 +115,7 @@
           <div></div>
           <div class="modal-actions-right">
             <button type="button" id="cancelMoveBtn" class="ghost-btn">Cancel</button>
-            <button type="submit" class="primary-btn">Move activity</button>
+            <button type="submit" id="moveSubmitBtn" class="primary-btn">Move activity</button>
           </div>
         </div>
       </form>

@@ -10,6 +10,7 @@
   let activeFilters = new Set(); // member ids; empty = show all
   let editingTaskId = null;
   let movingTaskId = null;
+  let duplicatingTaskId = null;
 
   const el = (id) => document.getElementById(id);
   const board = el('board');
@@ -508,6 +509,7 @@
 
     el('deleteTaskBtn').hidden = !editingTaskId;
     el('notifyTaskBtn').hidden = !editingTaskId;
+    el('duplicateTaskBtn').hidden = !editingTaskId;
     el('taskModalBackdrop').classList.add('open');
     el('taskTitle').focus();
   }
@@ -520,8 +522,23 @@
   function openMoveModal(task) {
     if (!task || task.status === 'completed') return;
     movingTaskId = task.id;
+    duplicatingTaskId = null;
+    el('moveModalTitle').textContent = 'Move activity';
     el('moveTaskLabel').textContent = `Choose a new date for “${task.title}”.`;
     el('moveDate').value = isoDate(taskDate(task));
+    el('moveSubmitBtn').textContent = 'Move activity';
+    el('moveModalBackdrop').classList.add('open');
+    el('moveDate').focus();
+  }
+
+  function openDuplicateModal(task) {
+    if (!task) return;
+    duplicatingTaskId = task.id;
+    movingTaskId = null;
+    el('moveModalTitle').textContent = 'Duplicate activity';
+    el('moveTaskLabel').textContent = `Choose a new date for a copy of “${task.title}”.`;
+    el('moveDate').value = isoDate(taskDate(task));
+    el('moveSubmitBtn').textContent = 'Duplicate activity';
     el('moveModalBackdrop').classList.add('open');
     el('moveDate').focus();
   }
@@ -529,6 +546,7 @@
   function closeMoveModal() {
     el('moveModalBackdrop').classList.remove('open');
     movingTaskId = null;
+    duplicatingTaskId = null;
   }
 
   async function setStatus(taskId, status) {
@@ -597,6 +615,13 @@
     }
   });
 
+  el('duplicateTaskBtn').addEventListener('click', () => {
+    const task = state.tasks.find((item) => item.id === editingTaskId);
+    if (!task) return;
+    closeTaskModal();
+    openDuplicateModal(task);
+  });
+
   el('cancelTaskBtn').addEventListener('click', closeTaskModal);
   el('taskModalBackdrop').addEventListener('click', (e) => {
     if (e.target === el('taskModalBackdrop')) closeTaskModal();
@@ -606,16 +631,33 @@
 
   el('moveForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const task = state.tasks.find((t) => t.id === movingTaskId);
+    const isDuplicate = Boolean(duplicatingTaskId);
+    const taskId = movingTaskId || duplicatingTaskId;
+    const task = state.tasks.find((t) => t.id === taskId);
     if (!task) return closeMoveModal();
     const position = taskPosition(el('moveDate').value);
     try {
-      await api(`/api/tasks/${task.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ day: position.day, weekStart: position.weekStart }),
-      });
+      if (isDuplicate) {
+        await api('/api/tasks', {
+          method: 'POST',
+          body: JSON.stringify({
+            title: task.title,
+            notes: task.notes,
+            time: task.time,
+            day: position.day,
+            weekStart: position.weekStart,
+            assigneeId: task.assigneeId,
+            status: task.status,
+          }),
+        });
+      } else {
+        await api(`/api/tasks/${task.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ day: position.day, weekStart: position.weekStart }),
+        });
+      }
       closeMoveModal();
-      showToast(`Moved “${task.title}” to ${el('moveDate').value}`);
+      showToast(`${isDuplicate ? 'Duplicated' : 'Moved'} “${task.title}” to ${el('moveDate').value}`);
       await loadState();
     } catch (err) {
       showToast(err.message);
