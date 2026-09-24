@@ -3,7 +3,16 @@
   "productName": "Weekly Planner",
   "files": [
     "public/**/*",
-    "electron/**/*"
+    "electron/**/*",
+    "server.js",
+    "lib/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "data/db.json",
+      "to": "seed-db.json"
+    }
   ],
   "directories": {
     "output": "C:/Users/UniPod/AppData/Local/WeeklyPlannerBuild"

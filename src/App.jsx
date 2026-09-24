@@ -195,6 +195,10 @@ function App() {
     return { total, done, pct }
   }, [visibleWeekTasks])
 
+  const earliestPastTask = useMemo(() => tasks
+    .filter((task) => taskDate(task) < currentWeekStart)
+    .sort((a, b) => taskDate(a) - taskDate(b))[0], [currentWeekStart, tasks])
+
   function notify(message) {
     setToast(message)
   }
@@ -485,6 +489,16 @@ function App() {
           </select>
           <button type="button" className="ghost-btn" onClick={() => setMembersModalOpen(true)}>Team</button>
           <button type="button" className="ghost-btn" onClick={handleExportPdf}>Export PDF</button>
+          {earliestPastTask ? (
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => setCurrentWeekStart(mondayOf(taskDate(earliestPastTask)))}
+              title="Jump to your oldest saved activity"
+            >
+              Past entries
+            </button>
+          ) : null}
           <button
             type="button"
             className="ghost-btn theme-toggle"
