@@ -466,7 +466,9 @@ function App() {
     <>
       <header className="app-header">
         <div className="brand">
-          <div className="brand-mark">F&amp;F</div>
+          <div className="brand-mark">
+            <img src="/logo.svg" alt="Frame & Frqnc logo" />
+          </div>
           <div>
             <h1>Frame &amp; Frqnc</h1>
             <p className="subtitle">Weekly Planner</p>
