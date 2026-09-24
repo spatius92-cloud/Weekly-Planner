@@ -4,9 +4,18 @@ A lightweight, shared weekly planner built for the Frame & Frqnc team. Every
 member can add, schedule, edit, and track activities across a Monday–Sunday
 board, and mark work as **Pending**, **In progress**, or **Completed**.
 
+## Web, Desktop, and Mobile
+
+The repository contains one React planner client shared by the deployed web
+app, Windows desktop packaging through Electron, and Android/iOS packaging
+through Capacitor. The Express API and `data/db.json` remain the source of
+truth for tasks, team members, and report data.
+
+The app is served from `public/` in production. The React source is in `src/`.
+
 ## Why a website instead of a desktop app
 
-This project is built as a **web app** rather than a native desktop
+This project started as a **web app** rather than a native desktop
 application, for a few practical reasons specific to a small team planner:
 
 - **One shared board, always in sync.** The planner's whole point is that
@@ -24,11 +33,8 @@ application, for a few practical reasons specific to a small team planner:
   deploys in minutes to services like Render, Railway, Fly.io, or a basic
   VPS, for little to no cost at this scale.
 
-A desktop app would only make sense if the team needed offline-first use
-with no server at all, or deep OS integration (system tray, native
-notifications, file system access). Neither is a priority for a team
-scheduling board, so the web version is the recommended and implemented
-approach.
+A desktop app is now available for packaged workflows, while the web app
+remains the shared online experience.
 
 ## Features
 
@@ -59,12 +65,26 @@ npm start
 Then open [http://localhost:3000](http://localhost:3000) in a browser. Share that URL (or your
 deployed URL) with the team so everyone works off the same planner.
 
+For development and packaging:
+
+```bash
+npm run build
+npm run desktop:dev
+npm run desktop:dist
+npm run cap:android
+npm run cap:ios
+```
+
 ## Project structure
 
 ```text
 server.js        Express server + REST API, persists to data/db.json
-data/db.json      Simple JSON "database" (members + tasks)
-public/           Front-end: index.html, styles.css, app.js
+data/db.json     Simple JSON "database" (members + tasks)
+src/             React planner source
+public/          Built web frontend served by Express and Vercel
+android/         Capacitor Android project
+ios/             Capacitor iOS project
+electron/        Electron desktop wrapper
 ```
 
 ## API

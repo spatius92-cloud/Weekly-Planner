@@ -2,20 +2,45 @@
   "name": "frame-frqnc-weekly-planner",
   "version": "1.0.0",
   "description": "Weekly Planner for Frame & Frqnc — schedule, edit, and track team activities.",
-  "main": "server.js",
+  "main": "electron/main.cjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "build": "vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "cap": "cap",
+    "cap:sync": "npm run build && cap sync",
+    "cap:android": "npm run build && cap sync android",
+    "cap:ios": "npm run build && cap sync ios",
+    "desktop:dev": "npm run build && electron electron/main.cjs",
+    "desktop:dist": "npm run build && electron-builder --config electron-builder.config.json"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/electron": "^2.5.0",
+    "@capacitor/ios": "^8.5.2",
     "@upstash/redis": "^1.38.2",
     "dotenv": "^17.4.2",
     "express": "^4.19.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "twilio": "^6.0.2",
     "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^40.1.0",
+    "electron-builder": "^26.0.12",
+    "oxlint": "^1.81.1",
+    "vite": "^8.3.0"
   },
   "license": "UNLICENSED",
   "private": true

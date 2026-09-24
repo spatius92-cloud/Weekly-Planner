@@ -1,5 +1,5 @@
 {
   "appId": "com.framefrqnc.weeklyplanner",
   "appName": "Weekly Planner",
-  "webDir": "dist"
+  "webDir": "public"
 }

@@ -15,7 +15,7 @@ function createWindow() {
     },
   });
 
-  window.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  window.loadFile(path.join(__dirname, '..', 'public', 'index.html'));
 }
 
 app.whenReady().then(() => {

@@ -2,7 +2,7 @@
   "appId": "com.framefrqnc.weeklyplanner.desktop",
   "productName": "Weekly Planner",
   "files": [
-    "dist/**/*",
+    "public/**/*",
     "electron/**/*"
   ],
   "directories": {
