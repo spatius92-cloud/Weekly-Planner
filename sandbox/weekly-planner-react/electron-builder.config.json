@@ -1,0 +1,11 @@
+{
+  "appId": "com.framefrqnc.weeklyplanner.desktop",
+  "productName": "Weekly Planner",
+  "files": [
+    "dist/**/*",
+    "electron/**/*"
+  ],
+  "directories": {
+    "output": "C:/Users/UniPod/AppData/Local/WeeklyPlannerBuild"
+  }
+}
