@@ -1,6 +1,7 @@
 {
   "appId": "com.framefrqnc.weeklyplanner.desktop",
   "productName": "Weekly Planner",
+  "icon": "resources/icon.png",
   "files": [
     "public/**/*",
     "electron/**/*",
