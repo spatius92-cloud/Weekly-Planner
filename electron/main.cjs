@@ -3,6 +3,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 
+const REMOTE_APP_URL = 'https://frame-frqnc-weekly-planner.vercel.app/';
 let httpServer = null;
 
 function serverIsReady() {
@@ -66,12 +67,16 @@ async function createWindow() {
     },
   });
 
-  await waitForServer();
-  window.loadURL('http://127.0.0.1:3000/');
+  try {
+    await window.loadURL(REMOTE_APP_URL);
+  } catch (_) {
+    await startLocalServer();
+    await waitForServer();
+    await window.loadURL('http://127.0.0.1:3000/');
+  }
 }
 
 app.whenReady().then(async () => {
-  await startLocalServer();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
