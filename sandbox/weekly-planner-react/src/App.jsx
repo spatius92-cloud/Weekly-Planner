@@ -9,6 +9,24 @@ const WEEKS_AHEAD = 4
 const STORAGE_KEY = 'weekly-planner-react-state-v1'
 const THEME_KEY = 'weekly-planner-theme'
 
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  })
+  if (!response.ok) {
+    let message = 'Something went wrong.'
+    try {
+      message = (await response.json()).error || message
+    } catch {
+      // Keep the generic message when the server does not return JSON.
+    }
+    throw new Error(message)
+  }
+  if (response.status === 204) return null
+  return response.json()
+}
+
 const defaultMembers = [
   { id: 'm-1', name: 'Mpho', phone: '+26771123456', color: '#6C5CE7' },
   { id: 'm-2', name: 'Lerato', phone: '+26772234567', color: '#00B894' },
@@ -112,6 +130,7 @@ function App() {
   const [newMemberName, setNewMemberName] = useState('')
   const [newMemberPhone, setNewMemberPhone] = useState('')
   const [toast, setToast] = useState('')
+  const [serverReady, setServerReady] = useState(false)
   const [theme, setTheme] = useState(() => {
     if (typeof window === 'undefined') return 'light'
     const storedTheme = window.localStorage.getItem(THEME_KEY)
@@ -122,6 +141,18 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ members, tasks }))
   }, [members, tasks])
+
+  useEffect(() => {
+    api('/api/state')
+      .then((serverState) => {
+        setMembers(Array.isArray(serverState.members) ? serverState.members : [])
+        setTasks(Array.isArray(serverState.tasks) ? serverState.tasks : [])
+        setServerReady(true)
+      })
+      .catch(() => {
+        notify('Working from local data - server connection unavailable')
+      })
+  }, [])
 
   useEffect(() => {
     if (selectedUserId) {
@@ -217,7 +248,7 @@ function App() {
     setTaskForm((current) => ({ ...current, [name]: value }))
   }
 
-  function handleTaskSubmit(event) {
+  async function handleTaskSubmit(event) {
     event.preventDefault()
     const payload = {
       title: taskForm.title.trim(),
@@ -234,36 +265,61 @@ function App() {
       return
     }
 
-    if (editingTaskId) {
-      setTasks((current) => current.map((task) => task.id === editingTaskId ? { ...task, ...payload, updatedAt: new Date().toISOString() } : task))
-      notify('Activity updated')
-    } else {
-      const newTask = {
-        id: `t-${Date.now()}`,
-        ...payload,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+    try {
+      if (serverReady) {
+        if (editingTaskId) {
+          const updatedTask = await api(`/api/tasks/${editingTaskId}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+          })
+          setTasks((current) => current.map((task) => task.id === editingTaskId ? updatedTask : task))
+          notify('Activity updated')
+        } else {
+          const newTask = await api('/api/tasks', { method: 'POST', body: JSON.stringify(payload) })
+          setTasks((current) => [newTask, ...current])
+          notify('Activity added')
+        }
+      } else if (editingTaskId) {
+        setTasks((current) => current.map((task) => task.id === editingTaskId ? { ...task, ...payload, updatedAt: new Date().toISOString() } : task))
+        notify('Activity updated locally')
+      } else {
+        const newTask = { id: `t-${Date.now()}`, ...payload, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+        setTasks((current) => [newTask, ...current])
+        notify('Activity added locally')
       }
-      setTasks((current) => [newTask, ...current])
-      notify('Activity added')
+    } catch (error) {
+      notify(error.message)
+      return
     }
 
     closeTaskModal()
   }
 
-  function handleDeleteTask() {
+  async function handleDeleteTask() {
     if (!editingTaskId) return
-    setTasks((current) => current.filter((task) => task.id !== editingTaskId))
-    notify('Activity deleted')
-    closeTaskModal()
+    try {
+      if (serverReady) await api(`/api/tasks/${editingTaskId}`, { method: 'DELETE' })
+      setTasks((current) => current.filter((task) => task.id !== editingTaskId))
+      notify('Activity deleted')
+      closeTaskModal()
+    } catch (error) {
+      notify(error.message)
+    }
   }
 
-  function handleStatusChange(taskId, nextStatus) {
-    setTasks((current) => current.map((task) => task.id === taskId ? { ...task, status: nextStatus, updatedAt: new Date().toISOString() } : task))
-    notify(`Marked as ${STATUS_LABEL[nextStatus].toLowerCase()}`)
+  async function handleStatusChange(taskId, nextStatus) {
+    try {
+      const updatedTask = serverReady
+        ? await api(`/api/tasks/${taskId}/status`, { method: 'PATCH', body: JSON.stringify({ status: nextStatus }) })
+        : { ...tasks.find((task) => task.id === taskId), status: nextStatus, updatedAt: new Date().toISOString() }
+      setTasks((current) => current.map((task) => task.id === taskId ? updatedTask : task))
+      notify(`Marked as ${STATUS_LABEL[nextStatus].toLowerCase()}`)
+    } catch (error) {
+      notify(error.message)
+    }
   }
 
-  function handleMoveSubmit(event) {
+  async function handleMoveSubmit(event) {
     event.preventDefault()
     if (!moveTargetId) return
 
@@ -272,20 +328,23 @@ function App() {
 
     const position = taskPosition(moveDate)
 
-    if (duplicateMode) {
-      const duplicatedTask = {
-        ...sourceTask,
-        id: `t-${Date.now()}`,
-        day: position.day,
-        weekStart: position.weekStart,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+    try {
+      if (duplicateMode) {
+        const duplicatedTask = serverReady
+          ? await api('/api/tasks', { method: 'POST', body: JSON.stringify({ ...sourceTask, day: position.day, weekStart: position.weekStart }) })
+          : { ...sourceTask, id: `t-${Date.now()}`, day: position.day, weekStart: position.weekStart, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+        setTasks((current) => [duplicatedTask, ...current])
+        notify('Activity duplicated')
+      } else {
+        const movedTask = serverReady
+          ? await api(`/api/tasks/${moveTargetId}`, { method: 'PUT', body: JSON.stringify({ day: position.day, weekStart: position.weekStart }) })
+          : { ...sourceTask, day: position.day, weekStart: position.weekStart, updatedAt: new Date().toISOString() }
+        setTasks((current) => current.map((task) => task.id === moveTargetId ? movedTask : task))
+        notify('Activity moved')
       }
-      setTasks((current) => [duplicatedTask, ...current])
-      notify('Activity duplicated')
-    } else {
-      setTasks((current) => current.map((task) => task.id === moveTargetId ? { ...task, day: position.day, weekStart: position.weekStart, updatedAt: new Date().toISOString() } : task))
-      notify('Activity moved')
+    } catch (error) {
+      notify(error.message)
+      return
     }
 
     closeMoveModal()
@@ -297,7 +356,7 @@ function App() {
       : [...current, memberId])
   }
 
-  function handleAddMember(event) {
+  async function handleAddMember(event) {
     event.preventDefault()
     const trimmedName = newMemberName.trim()
     if (!trimmedName) {
@@ -305,35 +364,48 @@ function App() {
       return
     }
 
-    const nextMember = {
-      id: `m-${Date.now()}`,
-      name: trimmedName,
-      phone: normalizePhone(newMemberPhone),
-      color: ['#6C5CE7', '#00B894', '#0984E3', '#E17055', '#FDCB6E', '#E84393', '#00CEC9', '#D63031'][members.length % 8],
-    }
-
-    setMembers((current) => [...current, nextMember])
-    if (!selectedUserId) {
-      setSelectedUserId(nextMember.id)
+    try {
+      const nextMember = serverReady
+        ? await api('/api/members', { method: 'POST', body: JSON.stringify({ name: trimmedName, phone: newMemberPhone }) })
+        : { id: `m-${Date.now()}`, name: trimmedName, phone: normalizePhone(newMemberPhone), color: ['#6C5CE7', '#00B894', '#0984E3', '#E17055', '#FDCB6E', '#E84393', '#00CEC9', '#D63031'][members.length % 8] }
+      setMembers((current) => [...current, nextMember])
+      if (!selectedUserId) setSelectedUserId(nextMember.id)
+    } catch (error) {
+      notify(error.message)
+      return
     }
     setNewMemberName('')
     setNewMemberPhone('')
     notify(`${trimmedName} added to the team`)
   }
 
-  function updateMemberPhone(memberId, phoneValue) {
-    setMembers((current) => current.map((member) => member.id === memberId ? { ...member, phone: normalizePhone(phoneValue) } : member))
+  async function updateMemberPhone(memberId, phoneValue) {
+    const phone = normalizePhone(phoneValue)
+    try {
+      const updatedMember = serverReady
+        ? await api(`/api/members/${memberId}`, { method: 'PATCH', body: JSON.stringify({ phone }) })
+        : { ...members.find((member) => member.id === memberId), phone }
+      setMembers((current) => current.map((member) => member.id === memberId ? updatedMember : member))
+    } catch (error) {
+      notify(error.message)
+    }
   }
 
-  function removeMember(memberId) {
+  async function removeMember(memberId) {
     const member = members.find((item) => item.id === memberId)
     if (!member) return
 
     const confirmed = window.confirm(`Remove ${member.name}? Their tasks will become unassigned.`)
     if (!confirmed) return
 
-    setMembers((current) => current.filter((item) => item.id !== memberId))
-    setTasks((current) => current.map((task) => task.assigneeId === memberId ? { ...task, assigneeId: null } : task))
+    try {
+      if (serverReady) await api(`/api/members/${memberId}`, { method: 'DELETE' })
+      setMembers((current) => current.filter((item) => item.id !== memberId))
+      setTasks((current) => current.map((task) => task.assigneeId === memberId ? { ...task, assigneeId: null } : task))
+    } catch (error) {
+      notify(error.message)
+      return
+    }
     if (selectedUserId === memberId) {
       const remainingMembers = members.filter((item) => item.id !== memberId)
       setSelectedUserId(remainingMembers[0]?.id || '')
@@ -632,7 +704,8 @@ function App() {
                     type="tel"
                     className="member-phone-input"
                     value={member.phone}
-                    onChange={(event) => updateMemberPhone(member.id, event.target.value)}
+                    onChange={(event) => setMembers((current) => current.map((item) => item.id === member.id ? { ...item, phone: event.target.value } : item))}
+                    onBlur={(event) => updateMemberPhone(member.id, event.target.value)}
                     placeholder="71234567 or +26771234567"
                   />
                   <button type="button" className="remove-member" onClick={() => removeMember(member.id)} title="Remove member">x</button>
