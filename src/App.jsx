@@ -8,9 +8,10 @@ const STATUS_BTN_LABEL = { pending: 'Pending', 'in-progress': 'Doing', completed
 const WEEKS_AHEAD = 4
 const STORAGE_KEY = 'weekly-planner-react-state-v1'
 const THEME_KEY = 'weekly-planner-theme'
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   })
@@ -143,15 +144,40 @@ function App() {
   }, [members, tasks])
 
   useEffect(() => {
-    api('/api/state')
-      .then((serverState) => {
+    let active = true
+    let requestInFlight = false
+    let hasReportedConnectionError = false
+
+    async function refreshState() {
+      if (requestInFlight) return
+      requestInFlight = true
+      try {
+        const serverState = await api('/api/state')
+        if (!active) return
         setMembers(Array.isArray(serverState.members) ? serverState.members : [])
         setTasks(Array.isArray(serverState.tasks) ? serverState.tasks : [])
         setServerReady(true)
-      })
-      .catch(() => {
-        notify('Working from local data - server connection unavailable')
-      })
+        hasReportedConnectionError = false
+      } catch {
+        if (!active) return
+        setServerReady(false)
+        if (!hasReportedConnectionError) {
+          notify('Shared planner connection unavailable')
+          hasReportedConnectionError = true
+        }
+      } finally {
+        requestInFlight = false
+      }
+    }
+
+    refreshState()
+    const interval = window.setInterval(refreshState, 15000)
+    window.addEventListener('focus', refreshState)
+    return () => {
+      active = false
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refreshState)
+    }
   }, [])
 
   useEffect(() => {
@@ -201,6 +227,12 @@ function App() {
 
   function notify(message) {
     setToast(message)
+  }
+
+  function requireServer() {
+    if (serverReady) return true
+    notify('Connect to the shared planner before making changes.')
+    return false
   }
 
   function openTaskModal(task = null) {
@@ -254,6 +286,7 @@ function App() {
 
   async function handleTaskSubmit(event) {
     event.preventDefault()
+    if (!requireServer()) return
     const payload = {
       title: taskForm.title.trim(),
       notes: taskForm.notes.trim(),
@@ -301,6 +334,7 @@ function App() {
 
   async function handleDeleteTask() {
     if (!editingTaskId) return
+    if (!requireServer()) return
     try {
       if (serverReady) await api(`/api/tasks/${editingTaskId}`, { method: 'DELETE' })
       setTasks((current) => current.filter((task) => task.id !== editingTaskId))
@@ -312,6 +346,7 @@ function App() {
   }
 
   async function handleStatusChange(taskId, nextStatus) {
+    if (!requireServer()) return
     try {
       const updatedTask = serverReady
         ? await api(`/api/tasks/${taskId}/status`, { method: 'PATCH', body: JSON.stringify({ status: nextStatus }) })
@@ -325,6 +360,7 @@ function App() {
 
   async function handleMoveSubmit(event) {
     event.preventDefault()
+    if (!requireServer()) return
     if (!moveTargetId) return
 
     const sourceTask = tasks.find((task) => task.id === moveTargetId)
@@ -362,6 +398,7 @@ function App() {
 
   async function handleAddMember(event) {
     event.preventDefault()
+    if (!requireServer()) return
     const trimmedName = newMemberName.trim()
     if (!trimmedName) {
       notify('Member name is required.')
@@ -384,6 +421,7 @@ function App() {
   }
 
   async function updateMemberPhone(memberId, phoneValue) {
+    if (!requireServer()) return
     const phone = normalizePhone(phoneValue)
     try {
       const updatedMember = serverReady
@@ -396,6 +434,7 @@ function App() {
   }
 
   async function removeMember(memberId) {
+    if (!requireServer()) return
     const member = members.find((item) => item.id === memberId)
     if (!member) return
 
@@ -477,7 +516,10 @@ function App() {
 
         <div className="week-nav">
           <button type="button" className="icon-btn" onClick={() => setCurrentWeekStart((current) => addDays(current, -7))} aria-label="Previous week">&lt;</button>
-          <div className="week-label">{formatWeekLabel(currentWeekStart, WEEKS_AHEAD)}</div>
+          <div className="week-label">
+            <span className="week-label-desktop">{formatWeekLabel(currentWeekStart, WEEKS_AHEAD)}</span>
+            <span className="week-label-mobile">{formatWeekLabel(currentWeekStart)}</span>
+          </div>
           <button type="button" className="icon-btn" onClick={() => setCurrentWeekStart((current) => addDays(current, 7))} aria-label="Next week">&gt;</button>
           <button type="button" className="ghost-btn" onClick={() => setCurrentWeekStart(mondayOf(new Date()))}>This week</button>
         </div>
@@ -575,8 +617,9 @@ function App() {
                                 ) : <span className="assignee-chip">Unassigned</span>}
                               </div>
                               {task.status !== 'completed' ? (
-                                <button type="button" className="move-task-btn" onClick={(event) => { event.stopPropagation(); openMoveModal(task, false) }}>
-                                  Move to another day
+                                <button type="button" className="move-task-btn" aria-label="Move to another day" onClick={(event) => { event.stopPropagation(); openMoveModal(task, false) }}>
+                                  <span className="move-task-label-full">Move to another day</span>
+                                  <span className="move-task-label-short" aria-hidden="true">Move</span>
                                 </button>
                               ) : null}
                               <div className="status-buttons" onClick={(event) => event.stopPropagation()}>

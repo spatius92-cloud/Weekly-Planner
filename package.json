@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "cap": "cap",
     "cap:sync": "npm run build && cap sync",
-    "cap:android": "npm run build && cap sync android",
+    "build:android": "vite build --mode android",
+    "cap:android": "npm run build:android && cap sync android",
     "cap:ios": "npm run build && cap sync ios",
     "desktop:dev": "npm run build && electron electron/main.cjs",
     "desktop:dist": "npm run build && electron-builder --config electron-builder.config.json"

@@ -8,8 +8,9 @@ board, and mark work as **Pending**, **In progress**, or **Completed**.
 
 The repository contains one React planner client shared by the deployed web
 app, Windows desktop packaging through Electron, and Android/iOS packaging
-through Capacitor. The Express API and `data/db.json` remain the source of
-truth for tasks, team members, and report data.
+through Capacitor. The Express API is the source of truth for tasks, team
+members, and report data. It uses `data/db.json` locally and Upstash Redis
+when configured for Vercel.
 
 The app is served from `public/` in production. The React source is in `src/`.
 
@@ -75,6 +76,10 @@ npm run cap:android
 npm run cap:ios
 ```
 
+Android builds use the shared Vercel API configured in `.env.android`. Deploy
+the API's CORS support before installing a newly built APK so the app can read
+and write the shared planner state.
+
 ## Project structure
 
 ```text
@@ -121,5 +126,7 @@ Any Node-friendly host works. Example with Render/Railway-style platforms:
 3. Build command: `npm install`. Start command: `npm start`.
 4. The app reads `PORT` from the environment automatically.
 
-For persistence beyond a single ephemeral container, mount a persistent
-disk for `data/db.json` or migrate to a hosted database as noted above.
+For Vercel, connect Upstash Redis and set `KV_REST_API_URL` and
+`KV_REST_API_TOKEN` (or the equivalent Upstash REST variables accepted in
+`lib/db.js`). Vercel's function filesystem is ephemeral, so `data/db.json`
+alone does not guarantee that updates persist across invocations.
