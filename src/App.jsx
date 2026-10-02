@@ -4,6 +4,9 @@ import { LocalNotifications } from '@capacitor/local-notifications'
 import { PushNotifications } from '@capacitor/push-notifications'
 import './App.css'
 
+const PHONE_NOTIFICATION_CHANNEL_ID = 'planner-updates-v3'
+const PHONE_NOTIFICATION_SOUND = 'planner_notification.wav'
+
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const STATUS_ORDER = ['pending', 'in-progress', 'completed']
 const STATUS_LABEL = { pending: 'Pending', 'in-progress': 'In progress', completed: 'Completed' }
@@ -237,7 +240,8 @@ function App() {
               id: Date.now() % 2147483647,
               title: notification.title || 'Planner update',
               body: notification.body || 'There is a planner update.',
-              channelId: 'planner-updates',
+              channelId: PHONE_NOTIFICATION_CHANNEL_ID,
+              sound: PHONE_NOTIFICATION_SOUND,
             }],
           }).catch((error) => notify(error.message))
         }),
@@ -250,8 +254,18 @@ function App() {
         const permission = await PushNotifications.checkPermissions()
         if (active && permission.receive === 'granted') {
           if (Capacitor.getPlatform() === 'android') {
-            await PushNotifications.createChannel({ id: 'planner-updates', name: 'Planner updates', importance: 5 })
-            await LocalNotifications.createChannel({ id: 'planner-updates', name: 'Planner updates', importance: 5 })
+            await PushNotifications.createChannel({
+              id: PHONE_NOTIFICATION_CHANNEL_ID,
+              name: 'Planner updates',
+              importance: 5,
+              sound: PHONE_NOTIFICATION_SOUND,
+            })
+            await LocalNotifications.createChannel({
+              id: PHONE_NOTIFICATION_CHANNEL_ID,
+              name: 'Planner updates',
+              importance: 5,
+              sound: PHONE_NOTIFICATION_SOUND,
+            })
           }
           await PushNotifications.register()
         }
@@ -384,8 +398,18 @@ function App() {
         if (permission.receive !== 'granted') permission = await PushNotifications.requestPermissions()
         if (permission.receive !== 'granted') throw new Error('Allow notifications in Android settings to receive planner alerts.')
         if (Capacitor.getPlatform() === 'android') {
-          await PushNotifications.createChannel({ id: 'planner-updates', name: 'Planner updates', importance: 5 })
-          await LocalNotifications.createChannel({ id: 'planner-updates', name: 'Planner updates', importance: 5 })
+          await PushNotifications.createChannel({
+            id: PHONE_NOTIFICATION_CHANNEL_ID,
+            name: 'Planner updates',
+            importance: 5,
+            sound: PHONE_NOTIFICATION_SOUND,
+          })
+          await LocalNotifications.createChannel({
+            id: PHONE_NOTIFICATION_CHANNEL_ID,
+            name: 'Planner updates',
+            importance: 5,
+            sound: PHONE_NOTIFICATION_SOUND,
+          })
         }
         await PushNotifications.register()
         notify('Phone alerts enabled')
