@@ -7,14 +7,13 @@ const path = require('path');
 const crypto = require('crypto');
 const { readDB, writeDB } = require('./lib/db');
 const { sendWhatsApp, hasTwilio } = require('./lib/notify');
-const { sendPush } = require('./lib/push');
+const { sendPush, hasVapid, hasFirebase } = require('./lib/push');
+const { sendEmail, hasEmail } = require('./lib/email');
 const {
   assignedMessage,
   statusChangedMessage,
   reminderMessage,
   digestMessage,
-  pushAssigned,
-  pushStatusChanged,
   pushReminder,
   pushDigest,
 } = require('./lib/messages');
@@ -39,6 +38,7 @@ function id(prefix) {
 const STATUSES = ['pending', 'in-progress', 'completed'];
 const COLORS = ['#6C5CE7', '#00B894', '#0984E3', '#E17055', '#FDCB6E', '#E84393', '#00CEC9', '#D63031'];
 const PHONE_RE = /^\+[1-9]\d{7,14}$/; // E.164, e.g. +14155552671
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function isValidPhone(phone) {
@@ -62,18 +62,38 @@ function memberSubscriptions(db, memberId) {
   return db.pushSubscriptions.filter((s) => s.memberId === memberId);
 }
 
-// Sends to every device subscribed for that member; returns the endpoints
-// that turned out to be dead so the caller can prune them.
 async function pushToMember(db, memberId, payload) {
-  const subs = memberSubscriptions(db, memberId);
-  const dead = [];
-  await Promise.all(
-    subs.map(async (sub) => {
-      const result = await sendPush(sub, payload);
-      if (result.expired) dead.push(sub.endpoint);
-    })
+  const results = await Promise.all(memberSubscriptions(db, memberId).map(async (subscription) => ({
+    subscription,
+    result: await sendPush(subscription, payload),
+  })));
+  const expiredIds = new Set(results
+    .filter(({ result }) => result.expired)
+    .map(({ subscription }) => subscription.token || subscription.endpoint));
+  if (expiredIds.size) {
+    db.pushSubscriptions = db.pushSubscriptions.filter((subscription) => !expiredIds.has(subscription.token || subscription.endpoint));
+    await writeDB(db);
+  }
+  return [...expiredIds];
+}
+
+async function notifyTeam(db, payload, { excludeMemberId = null, emailSubject = payload.title, emailText = payload.body } = {}) {
+  const subscriptions = db.pushSubscriptions.filter((subscription) => subscription.memberId !== excludeMemberId);
+  const emailMembers = db.members.filter((member) =>
+    member.id !== excludeMemberId && member.emailNotifications && EMAIL_RE.test(member.email || '')
   );
-  return dead;
+  const results = await Promise.all([
+    ...subscriptions.map(async (subscription) => ({ subscription, result: await sendPush(subscription, payload) })),
+    ...emailMembers.map((member) => sendEmail(member.email, emailSubject, emailText)),
+  ]);
+  const expiredDevices = results
+    .filter((result) => result?.result?.expired)
+    .map((result) => result.subscription);
+  if (expiredDevices.length) {
+    const expiredIds = new Set(expiredDevices.map((device) => device.token || device.endpoint));
+    db.pushSubscriptions = db.pushSubscriptions.filter((device) => !expiredIds.has(device.token || device.endpoint));
+    await writeDB(db);
+  }
 }
 
 // --- members ---------------------------------------------------------------
@@ -116,6 +136,11 @@ app.post('/api/chat', async (req, res) => {
   };
   db.chatMessages = [...db.chatMessages, message].slice(-500);
   await writeDB(db);
+  await notifyTeam(db, {
+    title: 'New team message',
+    body: `${sender.name}: ${text.slice(0, 120)}`,
+    tag: `chat-${message.id}`,
+  }, { excludeMemberId: sender.id, emailSubject: 'New team chat message', emailText: `${sender.name}:\n\n${text}` });
   res.status(201).json(message);
 });
 
@@ -135,10 +160,13 @@ app.post('/api/members', async (req, res) => {
     id: id('m'),
     name,
     phone,
+    email: '',
+    emailNotifications: false,
     color: COLORS[db.members.length % COLORS.length],
   };
   db.members.push(member);
   await writeDB(db);
+  await notifyTeam(db, { title: 'Team updated', body: `${member.name} joined the planner.`, tag: `member-${member.id}` });
   res.status(201).json(member);
 });
 
@@ -148,30 +176,39 @@ app.get('/api/push/vapid-public-key', (req, res) => {
   res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || null });
 });
 
+app.get('/api/notifications/status', (req, res) => {
+  res.json({ webPush: hasVapid, androidPush: hasFirebase, email: hasEmail });
+});
+
 app.post('/api/push/subscribe', async (req, res) => {
-  const { subscription, memberId } = req.body;
-  if (!subscription || !subscription.endpoint || !subscription.keys) {
-    return res.status(400).json({ error: 'A valid push subscription is required.' });
+  const { subscription, token, platform = 'web', memberId } = req.body;
+  const isAndroid = platform === 'android';
+  if (platform !== 'android' && platform !== 'web') return res.status(400).json({ error: 'platform must be web or android.' });
+  if (isAndroid ? (typeof token !== 'string' || token.length < 20 || token.length > 4096) : (!subscription || !subscription.endpoint || !subscription.keys)) {
+    return res.status(400).json({ error: isAndroid ? 'A valid Android push token is required.' : 'A valid push subscription is required.' });
   }
 
   const db = await readDB();
-  db.pushSubscriptions = db.pushSubscriptions.filter((s) => s.endpoint !== subscription.endpoint);
-  db.pushSubscriptions.push({
-    endpoint: subscription.endpoint,
-    keys: subscription.keys,
-    memberId: memberId || null,
-    createdAt: new Date().toISOString(),
-  });
+  if (!db.members.some((member) => member.id === memberId)) {
+    return res.status(400).json({ error: 'Choose a valid team member before enabling notifications.' });
+  }
+  const deviceId = isAndroid ? token : subscription.endpoint;
+  db.pushSubscriptions = db.pushSubscriptions.filter((item) => (item.token || item.endpoint) !== deviceId);
+  db.pushSubscriptions.push(isAndroid
+    ? { platform: 'android', token, memberId, createdAt: new Date().toISOString() }
+    : { platform: 'web', endpoint: subscription.endpoint, keys: subscription.keys, memberId, createdAt: new Date().toISOString() });
   await writeDB(db);
   res.status(201).json({ subscribed: true });
 });
 
 app.post('/api/push/unsubscribe', async (req, res) => {
-  const { endpoint } = req.body;
-  if (!endpoint) return res.status(400).json({ error: 'endpoint is required.' });
+  const { endpoint, token } = req.body;
+  if (!endpoint && !token) return res.status(400).json({ error: 'endpoint or token is required.' });
 
   const db = await readDB();
-  db.pushSubscriptions = db.pushSubscriptions.filter((s) => s.endpoint !== endpoint);
+  db.pushSubscriptions = db.pushSubscriptions.filter((item) =>
+    (!endpoint || item.endpoint !== endpoint) && (!token || item.token !== token)
+  );
   await writeDB(db);
   res.json({ subscribed: false });
 });
@@ -193,6 +230,18 @@ app.patch('/api/members/:id', async (req, res) => {
     if (!name) return res.status(400).json({ error: 'Member name cannot be empty.' });
     member.name = name;
   }
+  if (req.body.email !== undefined) {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    if (email && !EMAIL_RE.test(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
+    member.email = email;
+  }
+  if (req.body.emailNotifications !== undefined) {
+    if (typeof req.body.emailNotifications !== 'boolean') return res.status(400).json({ error: 'emailNotifications must be true or false.' });
+    if (req.body.emailNotifications && !EMAIL_RE.test(member.email || '')) {
+      return res.status(400).json({ error: 'Save a valid email address before enabling email alerts.' });
+    }
+    member.emailNotifications = req.body.emailNotifications;
+  }
 
   await writeDB(db);
   res.json(member);
@@ -204,11 +253,13 @@ app.delete('/api/members/:id', async (req, res) => {
   if (!exists) return res.status(404).json({ error: 'Member not found.' });
 
   db.members = db.members.filter((m) => m.id !== req.params.id);
+  db.pushSubscriptions = db.pushSubscriptions.filter((subscription) => subscription.memberId !== req.params.id);
   // Unassign their tasks rather than deleting them.
   db.tasks = db.tasks.map((t) =>
     t.assigneeId === req.params.id ? { ...t, assigneeId: null } : t
   );
   await writeDB(db);
+  await notifyTeam(db, { title: 'Team updated', body: 'A team member was removed from the planner.', tag: `member-${req.params.id}` });
   res.status(204).end();
 });
 
@@ -242,8 +293,12 @@ app.post('/api/tasks', async (req, res) => {
   if (task.assigneeId) {
     const member = db.members.find((m) => m.id === task.assigneeId);
     if (member) sendWhatsApp(member.phone, assignedMessage(member, task));
-    pushToMember(db, task.assigneeId, pushAssigned(task));
   }
+  await notifyTeam(db, {
+    title: 'New planner activity',
+    body: task.title,
+    tag: `task-${task.id}`,
+  }, { emailSubject: 'New planner activity', emailText: `New activity: ${task.title}` });
 
   res.status(201).json(task);
 });
@@ -253,6 +308,7 @@ app.put('/api/tasks/:id', async (req, res) => {
   const task = db.tasks.find((t) => t.id === req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found.' });
 
+  const previousTask = { ...task };
   const prevAssigneeId = task.assigneeId;
   const prevStatus = task.status;
 
@@ -286,11 +342,19 @@ app.put('/api/tasks/:id', async (req, res) => {
   if (task.assigneeId && task.assigneeId !== prevAssigneeId) {
     const member = db.members.find((m) => m.id === task.assigneeId);
     if (member) sendWhatsApp(member.phone, assignedMessage(member, task));
-    pushToMember(db, task.assigneeId, pushAssigned(task));
   } else if (task.status !== prevStatus && task.assigneeId) {
     const member = db.members.find((m) => m.id === task.assigneeId);
     if (member) sendWhatsApp(member.phone, statusChangedMessage(member, task));
-    pushToMember(db, task.assigneeId, pushStatusChanged(task));
+  }
+
+  const changed = ['title', 'notes', 'time', 'day', 'weekStart', 'assigneeId', 'status']
+    .some((key) => task[key] !== previousTask[key]);
+  if (changed) {
+    await notifyTeam(db, {
+      title: 'Planner activity updated',
+      body: task.title,
+      tag: `task-${task.id}`,
+    }, { emailSubject: 'Planner activity updated', emailText: `Activity updated: ${task.title}` });
   }
 
   res.json(task);
@@ -312,7 +376,13 @@ app.patch('/api/tasks/:id/status', async (req, res) => {
   if (changed && task.assigneeId) {
     const member = db.members.find((m) => m.id === task.assigneeId);
     if (member) sendWhatsApp(member.phone, statusChangedMessage(member, task));
-    pushToMember(db, task.assigneeId, pushStatusChanged(task));
+  }
+  if (changed) {
+    await notifyTeam(db, {
+      title: 'Planner status changed',
+      body: `${task.title}: ${task.status}`,
+      tag: `task-${task.id}`,
+    }, { emailSubject: 'Planner status changed', emailText: `${task.title} is now ${task.status}.` });
   }
 
   res.json(task);
@@ -325,6 +395,7 @@ app.post('/api/tasks/:id/notify', async (req, res) => {
 
   const target = String(req.body?.target || 'team').toLowerCase();
   const teamMembers = db.members.filter((member) => member.phone);
+  let emailMembers = db.members.filter((member) => member.emailNotifications && EMAIL_RE.test(member.email || ''));
   let membersWithPhones = teamMembers;
   let subscriptions = db.pushSubscriptions;
 
@@ -334,6 +405,7 @@ app.post('/api/tasks/:id/notify', async (req, res) => {
     }
     membersWithPhones = teamMembers.filter((member) => member.id === task.assigneeId);
     subscriptions = db.pushSubscriptions.filter((sub) => sub.memberId === task.assigneeId);
+    emailMembers = emailMembers.filter((member) => member.id === task.assigneeId);
   } else if (target === 'team' || target === 'all' || target === 'all-members' || target === 'team-members' || target === 'everyone') {
     membersWithPhones = teamMembers;
     subscriptions = db.pushSubscriptions;
@@ -341,38 +413,45 @@ app.post('/api/tasks/:id/notify', async (req, res) => {
     return res.status(400).json({ error: 'Unknown notification target. Use team or assignee.' });
   }
 
-  const [whatsappResults, pushResults] = await Promise.all([
+  const [whatsappResults, pushResults, emailResults] = await Promise.all([
     Promise.all(membersWithPhones.map((member) => sendWhatsApp(member.phone, reminderMessage(member, task)))),
     Promise.all(subscriptions.map((sub) => sendPush(sub, pushReminder(task)))),
+    Promise.all(emailMembers.map((member) => sendEmail(member.email, 'Planner reminder', reminderMessage(member, task)))),
   ]);
 
   const whatsappSentCount = whatsappResults.filter((result) => result.sent).length;
   const pushSentCount = pushResults.filter((result) => result.sent).length;
-  const deadEndpoints = subscriptions.filter((sub, i) => pushResults[i].expired).map((sub) => sub.endpoint);
+  const emailSentCount = emailResults.filter((result) => result.sent).length;
+  const deadEndpoints = subscriptions.filter((sub, i) => pushResults[i].expired).map((sub) => sub.token || sub.endpoint);
   if (deadEndpoints.length) {
-    db.pushSubscriptions = db.pushSubscriptions.filter((s) => !deadEndpoints.includes(s.endpoint));
+    db.pushSubscriptions = db.pushSubscriptions.filter((subscription) => !deadEndpoints.includes(subscription.token || subscription.endpoint));
     await writeDB(db);
   }
 
-  if (!whatsappSentCount && !pushSentCount) {
-    if (!membersWithPhones.length && !subscriptions.length) {
-      return res.status(400).json({ error: 'No team member has a WhatsApp number or enabled browser notifications for the selected contact target.' });
+  if (!whatsappSentCount && !pushSentCount && !emailSentCount) {
+    if (!membersWithPhones.length && !subscriptions.length && !emailMembers.length) {
+      return res.status(400).json({ error: 'No team member has a notification channel enabled for the selected target.' });
     }
-    if (membersWithPhones.length && !hasTwilio && !subscriptions.length) {
-      return res.status(502).json({ error: 'WhatsApp delivery is not configured on the server. Enable browser notifications or configure a WhatsApp provider.' });
+    if (membersWithPhones.length && !hasTwilio && !subscriptions.length && !hasEmail) {
+      return res.status(502).json({ error: 'Notification delivery is not configured. Configure push/email delivery or WhatsApp.' });
     }
     return res.status(502).json({ error: 'All notification deliveries failed. Check browser permissions and WhatsApp provider settings.' });
   }
-  res.json({ sent: true, whatsapp: whatsappSentCount, push: pushSentCount, recipients: membersWithPhones.length + subscriptions.length, target });
+  res.json({ sent: true, whatsapp: whatsappSentCount, push: pushSentCount, email: emailSentCount, recipients: membersWithPhones.length + subscriptions.length + emailMembers.length, target });
 });
 
 app.delete('/api/tasks/:id', async (req, res) => {
   const db = await readDB();
-  const exists = db.tasks.some((t) => t.id === req.params.id);
-  if (!exists) return res.status(404).json({ error: 'Task not found.' });
+  const task = db.tasks.find((item) => item.id === req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found.' });
 
   db.tasks = db.tasks.filter((t) => t.id !== req.params.id);
   await writeDB(db);
+  await notifyTeam(db, {
+    title: 'Planner activity removed',
+    body: task.title,
+    tag: `task-${task.id}`,
+  }, { emailSubject: 'Planner activity removed', emailText: `Activity removed: ${task.title}` });
   res.status(204).end();
 });
 
@@ -419,7 +498,7 @@ async function runDigest(db, weekStart, { weekly, todayIndex }) {
   }
 
   if (deadEndpoints.length) {
-    db.pushSubscriptions = db.pushSubscriptions.filter((s) => !deadEndpoints.includes(s.endpoint));
+    db.pushSubscriptions = db.pushSubscriptions.filter((subscription) => !deadEndpoints.includes(subscription.token || subscription.endpoint));
     await writeDB(db);
   }
   return results;

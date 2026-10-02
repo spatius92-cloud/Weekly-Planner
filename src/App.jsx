@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Capacitor } from '@capacitor/core'
+import { LocalNotifications } from '@capacitor/local-notifications'
+import { PushNotifications } from '@capacitor/push-notifications'
 import './App.css'
 
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -80,6 +83,13 @@ function normalizePhone(value) {
   return /^\d{8}$/.test(cleaned) ? `+267${cleaned}` : cleaned
 }
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = atob(base64)
+  return Uint8Array.from([...raw].map((character) => character.charCodeAt(0)))
+}
+
 function readStoredState() {
   if (typeof window === 'undefined') return { members: defaultMembers, tasks: defaultTasks }
 
@@ -132,6 +142,9 @@ function App() {
   const [newMemberPhone, setNewMemberPhone] = useState('')
   const [toast, setToast] = useState('')
   const [serverReady, setServerReady] = useState(false)
+  const [notificationCapabilities, setNotificationCapabilities] = useState(null)
+  const [phoneAlertsEnabled, setPhoneAlertsEnabled] = useState(false)
+  const [phoneAlertsBusy, setPhoneAlertsBusy] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [chatMessages, setChatMessages] = useState([])
   const [chatDraft, setChatDraft] = useState('')
@@ -186,6 +199,87 @@ function App() {
       window.removeEventListener('focus', refreshState)
     }
   }, [])
+
+  useEffect(() => {
+    if (!serverReady) return
+    let active = true
+    api('/api/notifications/status')
+      .then((status) => { if (active) setNotificationCapabilities(status) })
+      .catch(() => { if (active) setNotificationCapabilities(null) })
+    return () => { active = false }
+  }, [serverReady])
+
+  useEffect(() => {
+    if (!serverReady || !selectedUserId) return
+
+    if (Capacitor.isNativePlatform()) {
+      let active = true
+      let listeners = []
+      Promise.all([
+        PushNotifications.addListener('registration', async ({ value }) => {
+          try {
+            await api('/api/push/subscribe', {
+              method: 'POST',
+              body: JSON.stringify({ platform: 'android', token: value, memberId: selectedUserId }),
+            })
+            if (active) setPhoneAlertsEnabled(true)
+          } catch (error) {
+            if (active) notify(error.message)
+          }
+        }),
+        PushNotifications.addListener('registrationError', (error) => {
+          if (active) notify(`Phone notifications could not register: ${error.error || 'Try again.'}`)
+        }),
+        PushNotifications.addListener('pushNotificationReceived', (notification) => {
+          if (!active) return
+          LocalNotifications.schedule({
+            notifications: [{
+              id: Date.now() % 2147483647,
+              title: notification.title || 'Planner update',
+              body: notification.body || 'There is a planner update.',
+              channelId: 'planner-updates',
+            }],
+          }).catch((error) => notify(error.message))
+        }),
+      ]).then(async (handles) => {
+        if (!active) {
+          handles.forEach((handle) => handle.remove())
+          return
+        }
+        listeners = handles
+        const permission = await PushNotifications.checkPermissions()
+        if (active && permission.receive === 'granted') {
+          if (Capacitor.getPlatform() === 'android') {
+            await PushNotifications.createChannel({ id: 'planner-updates', name: 'Planner updates', importance: 5 })
+            await LocalNotifications.createChannel({ id: 'planner-updates', name: 'Planner updates', importance: 5 })
+          }
+          await PushNotifications.register()
+        }
+      }).catch((error) => {
+        if (active) notify(error.message)
+      })
+      return () => {
+        active = false
+        listeners.forEach((handle) => handle.remove())
+      }
+    }
+
+    let active = true
+    if ('serviceWorker' in navigator && 'PushManager' in window) {
+      navigator.serviceWorker.getRegistration()
+        .then((registration) => registration?.pushManager.getSubscription())
+        .then(async (subscription) => {
+          if (!active || !subscription) return
+          await api('/api/push/subscribe', {
+            method: 'POST',
+            body: JSON.stringify({ subscription: subscription.toJSON(), memberId: selectedUserId }),
+          })
+          if (active) setPhoneAlertsEnabled(true)
+        })
+        .catch((error) => { if (active) notify(error.message) })
+    }
+    return () => { active = false }
+  }, [selectedUserId, serverReady])
 
   useEffect(() => {
     if (!chatOpen) return
@@ -276,6 +370,70 @@ function App() {
 
   function notify(message) {
     setToast(message)
+  }
+
+  async function handleEnablePhoneAlerts() {
+    if (!requireServer() || phoneAlertsBusy) return
+    setPhoneAlertsBusy(true)
+    try {
+      if (Capacitor.isNativePlatform()) {
+        if (Capacitor.getPlatform() === 'android' && !notificationCapabilities?.androidPush) {
+          throw new Error('Android push is not configured on the planner server yet.')
+        }
+        let permission = await PushNotifications.checkPermissions()
+        if (permission.receive !== 'granted') permission = await PushNotifications.requestPermissions()
+        if (permission.receive !== 'granted') throw new Error('Allow notifications in Android settings to receive planner alerts.')
+        if (Capacitor.getPlatform() === 'android') {
+          await PushNotifications.createChannel({ id: 'planner-updates', name: 'Planner updates', importance: 5 })
+          await LocalNotifications.createChannel({ id: 'planner-updates', name: 'Planner updates', importance: 5 })
+        }
+        await PushNotifications.register()
+        notify('Phone alerts enabled')
+      } else {
+        if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+          throw new Error('This browser does not support push notifications.')
+        }
+        if (!notificationCapabilities?.webPush) throw new Error('Web push is not configured on this server.')
+        const permission = await Notification.requestPermission()
+        if (permission !== 'granted') throw new Error('Allow notifications in browser settings to receive planner alerts.')
+        const registration = await navigator.serviceWorker.register('/sw.js')
+        const { publicKey } = await api('/api/push/vapid-public-key')
+        if (!publicKey) throw new Error('Web push is not configured on this server.')
+        let subscription = await registration.pushManager.getSubscription()
+        if (!subscription) {
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(publicKey),
+          })
+        }
+        await api('/api/push/subscribe', {
+          method: 'POST',
+          body: JSON.stringify({ subscription: subscription.toJSON(), memberId: selectedUserId }),
+        })
+        setPhoneAlertsEnabled(true)
+        notify('Phone alerts enabled')
+      }
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setPhoneAlertsBusy(false)
+    }
+  }
+
+  async function saveMemberEmailSettings(memberId) {
+    if (!requireServer()) return
+    const member = members.find((item) => item.id === memberId)
+    if (!member) return
+    try {
+      const updatedMember = await api(`/api/members/${memberId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ email: member.email || '', emailNotifications: Boolean(member.emailNotifications) }),
+      })
+      setMembers((current) => current.map((item) => item.id === memberId ? updatedMember : item))
+      notify('Email notification settings saved')
+    } catch (error) {
+      notify(error.message)
+    }
   }
 
   async function handleChatSubmit(event) {
@@ -607,6 +765,15 @@ function App() {
           </select>
           <button type="button" className="ghost-btn" onClick={() => setMembersModalOpen(true)}>Team</button>
           <button type="button" className="ghost-btn" onClick={() => setChatOpen(true)} aria-label="Open team chat">Chat</button>
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={handleEnablePhoneAlerts}
+            disabled={phoneAlertsBusy || !serverReady || !selectedUserId || (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android' && !notificationCapabilities?.androidPush)}
+            title={Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android' && notificationCapabilities && !notificationCapabilities.androidPush ? 'Firebase server credentials are required for Android push.' : 'Enable phone notifications for planner activity and chat.'}
+          >
+            {phoneAlertsBusy ? 'Enabling...' : phoneAlertsEnabled ? 'Phone alerts on' : Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android' && notificationCapabilities && !notificationCapabilities.androidPush ? 'Android push setup required' : 'Enable phone alerts'}
+          </button>
           <button type="button" className="ghost-btn" onClick={handleExportPdf}>Export PDF</button>
           {earliestPastTask ? (
             <button
@@ -823,7 +990,8 @@ function App() {
         <div className="modal-backdrop open" onClick={(event) => event.target === event.currentTarget && setMembersModalOpen(false)}>
           <div className="modal">
             <h2>Team members</h2>
-            <p className="hint">Add a WhatsApp number for each contact, or leave it blank if you want unnotified members.</p>
+            <p className="hint">Add contact details and choose which team members receive email alerts.</p>
+            {notificationCapabilities && !notificationCapabilities.email ? <p className="notification-config-note">Email delivery is not configured on this server.</p> : null}
             <form onSubmit={handleAddMember} className="inline-form">
               <input type="text" value={newMemberName} onChange={(event) => setNewMemberName(event.target.value)} placeholder="Name" maxLength={60} required />
               <input type="tel" value={newMemberPhone} onChange={(event) => setNewMemberPhone(event.target.value)} placeholder="71234567 or +26771234567" />
@@ -832,8 +1000,30 @@ function App() {
 
             <ul className="member-list">
               {members.map((member) => (
-                <li key={member.id}>
-                  <span className="member-name"><span className="chip-dot" style={{ background: member.color }} />{member.name}</span>
+                <li key={member.id} className="member-settings-item">
+                  <div className="member-settings-heading">
+                    <span className="member-name"><span className="chip-dot" style={{ background: member.color }} />{member.name}</span>
+                    <button type="button" className="remove-member" onClick={() => removeMember(member.id)} title="Remove member">x</button>
+                  </div>
+                  <input
+                    type="email"
+                    className="member-email-input"
+                    value={member.email || ''}
+                    onChange={(event) => setMembers((current) => current.map((item) => item.id === member.id ? { ...item, email: event.target.value } : item))}
+                    placeholder="Email address"
+                    autoComplete="email"
+                  />
+                  <div className="member-alert-actions">
+                    <label className="member-email-toggle">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(member.emailNotifications)}
+                        onChange={(event) => setMembers((current) => current.map((item) => item.id === member.id ? { ...item, emailNotifications: event.target.checked } : item))}
+                      />
+                      Email alerts
+                    </label>
+                    <button type="button" className="ghost-btn" onClick={() => saveMemberEmailSettings(member.id)}>Save</button>
+                  </div>
                   <input
                     type="tel"
                     className="member-phone-input"
@@ -842,7 +1032,6 @@ function App() {
                     onBlur={(event) => updateMemberPhone(member.id, event.target.value)}
                     placeholder="71234567 or +26771234567"
                   />
-                  <button type="button" className="remove-member" onClick={() => removeMember(member.id)} title="Remove member">x</button>
                 </li>
               ))}
             </ul>

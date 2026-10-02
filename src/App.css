@@ -726,6 +726,60 @@ textarea {
   border-bottom: 1px solid var(--border);
 }
 
+.member-list li.member-settings-item {
+  display: block;
+  padding: 10px 4px;
+}
+
+.member-settings-heading,
+.member-alert-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.member-email-input {
+  width: 100%;
+  min-width: 0;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-alt);
+  color: var(--text);
+}
+
+.member-alert-actions {
+  margin: 7px 0;
+}
+
+.member-email-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.member-email-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--brand);
+}
+
+.member-alert-actions .ghost-btn {
+  padding: 5px 10px;
+  font-size: 0.74rem;
+}
+
+.notification-config-note {
+  margin: -6px 0 12px;
+  color: var(--danger);
+  font-size: 0.76rem;
+}
+
 .member-name {
   display: flex;
   align-items: center;

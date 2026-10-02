@@ -102,6 +102,27 @@ Android builds use the shared Vercel API configured in `.env.android`. Deploy
 the API's CORS support before installing a newly built APK so the app can read
 and write the shared planner state.
 
+### Planner notifications
+
+The React app supports browser push through VAPID. Set `VAPID_PUBLIC_KEY`,
+`VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` on the API host. Each browser must open
+the planner, choose its team member, and enable phone alerts once.
+
+For push in the Android APK, create a Firebase project, add an Android app with
+package ID `com.framefrqnc.weeklyplanner`, and place its `google-services.json`
+at `android/app/google-services.json` before building the APK. Create a Firebase
+service-account key and configure `FIREBASE_SERVICE_ACCOUNT_JSON` as a protected
+environment variable on the API host. Keep the service-account key private and
+never commit it. Each Android installation must open the planner and enable
+phone alerts to register its device.
+
+Email alerts are enabled per member in **Team** settings. Configure `RESEND_API_KEY`
+and `RESEND_FROM` on the API host, and verify the sender domain in Resend. Team
+members need a valid saved email address and must turn on **Email alerts**.
+Chat messages, activity changes, and team membership changes are then sent to
+their opted-in email addresses. The manual activity reminder also uses enabled
+email recipients.
+
 ## Project structure
 
 ```text
