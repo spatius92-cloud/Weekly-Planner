@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -132,6 +132,13 @@ function App() {
   const [newMemberPhone, setNewMemberPhone] = useState('')
   const [toast, setToast] = useState('')
   const [serverReady, setServerReady] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatMessages, setChatMessages] = useState([])
+  const [chatDraft, setChatDraft] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatSending, setChatSending] = useState(false)
+  const [chatError, setChatError] = useState('')
+  const chatEndRef = useRef(null)
   const [theme, setTheme] = useState(() => {
     if (typeof window === 'undefined') return 'light'
     const storedTheme = window.localStorage.getItem(THEME_KEY)
@@ -181,6 +188,48 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!chatOpen) return
+    let active = true
+    let requestInFlight = false
+
+    async function refreshChat(showLoading = false) {
+      if (requestInFlight) return
+      requestInFlight = true
+      if (showLoading) setChatLoading(true)
+      try {
+        const response = await api('/api/chat')
+        if (!active) return
+        const nextMessages = Array.isArray(response.messages) ? response.messages : []
+        setChatMessages((current) => {
+          const currentLastId = current[current.length - 1]?.id
+          const nextLastId = nextMessages[nextMessages.length - 1]?.id
+          return current.length === nextMessages.length && currentLastId === nextLastId ? current : nextMessages
+        })
+        setChatError('')
+      } catch (error) {
+        if (active) setChatError(error.message)
+      } finally {
+        requestInFlight = false
+        if (active && showLoading) setChatLoading(false)
+      }
+    }
+
+    const refreshOnFocus = () => refreshChat()
+    refreshChat(true)
+    const interval = window.setInterval(refreshChat, 5000)
+    window.addEventListener('focus', refreshOnFocus)
+    return () => {
+      active = false
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refreshOnFocus)
+    }
+  }, [chatOpen])
+
+  useEffect(() => {
+    if (chatOpen) chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [chatMessages, chatOpen])
+
+  useEffect(() => {
     if (selectedUserId) {
       window.localStorage.setItem('ff-current-user', selectedUserId)
     } else {
@@ -227,6 +276,31 @@ function App() {
 
   function notify(message) {
     setToast(message)
+  }
+
+  async function handleChatSubmit(event) {
+    event.preventDefault()
+    const text = chatDraft.trim()
+    if (!text || chatSending) return
+    if (!serverReady) {
+      setChatError('Connect to the shared planner before sending messages.')
+      return
+    }
+
+    setChatSending(true)
+    setChatError('')
+    try {
+      const message = await api('/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({ senderId: selectedUserId, text }),
+      })
+      setChatMessages((current) => [...current, message].slice(-100))
+      setChatDraft('')
+    } catch (error) {
+      setChatError(error.message)
+    } finally {
+      setChatSending(false)
+    }
   }
 
   function requireServer() {
@@ -532,6 +606,7 @@ function App() {
             ))}
           </select>
           <button type="button" className="ghost-btn" onClick={() => setMembersModalOpen(true)}>Team</button>
+          <button type="button" className="ghost-btn" onClick={() => setChatOpen(true)} aria-label="Open team chat">Chat</button>
           <button type="button" className="ghost-btn" onClick={handleExportPdf}>Export PDF</button>
           {earliestPastTask ? (
             <button
@@ -779,6 +854,59 @@ function App() {
               </div>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {chatOpen ? (
+        <div className="modal-backdrop open chat-backdrop" onClick={(event) => event.target === event.currentTarget && setChatOpen(false)}>
+          <section className="chat-modal" role="dialog" aria-modal="true" aria-labelledby="chatTitle">
+            <header className="chat-header">
+              <div>
+                <h2 id="chatTitle">Team chat</h2>
+                <p>{members.length} {members.length === 1 ? 'member' : 'members'}</p>
+              </div>
+              <button type="button" className="ghost-btn" onClick={() => setChatOpen(false)}>Close</button>
+            </header>
+
+            <div className="chat-messages" aria-live="polite" aria-relevant="additions text">
+              {chatMessages.length ? chatMessages.map((message) => {
+                const sender = members.find((member) => member.id === message.senderId)
+                const ownMessage = message.senderId === selectedUserId
+                return (
+                  <article key={message.id} className={`chat-message ${ownMessage ? 'own' : ''}`} style={{ '--sender-color': sender?.color || 'var(--brand)' }}>
+                    <div className="chat-message-meta">
+                      <span>{ownMessage ? 'You' : message.senderName}</span>
+                      <time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
+                    </div>
+                    <div className="chat-message-bubble">{message.text}</div>
+                  </article>
+                )
+              }) : chatLoading ? (
+                <p className="chat-empty">Loading messages...</p>
+              ) : (
+                <p className="chat-empty">No messages yet. Start the conversation.</p>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {chatError ? <p className="chat-error" role="alert">{chatError}</p> : null}
+
+            <form className="chat-composer" onSubmit={handleChatSubmit}>
+              <label className="sr-only" htmlFor="chatMessage">Message</label>
+              <input
+                id="chatMessage"
+                type="text"
+                value={chatDraft}
+                onChange={(event) => setChatDraft(event.target.value)}
+                placeholder="Message the team..."
+                maxLength={1000}
+                autoComplete="off"
+              />
+              <button type="submit" className="primary-btn" disabled={!chatDraft.trim() || !selectedUserId || chatSending}>
+                {chatSending ? 'Sending...' : 'Send'}
+              </button>
+            </form>
+          </section>
         </div>
       ) : null}
 

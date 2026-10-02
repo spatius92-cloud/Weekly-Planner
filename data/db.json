@@ -45,5 +45,14 @@
       "memberId": "m-founder",
       "createdAt": "2026-09-17T11:27:52.368Z"
     }
+  ],
+  "chatMessages": [
+    {
+      "id": "c-eb07bbdef1fb",
+      "senderId": "m-founder",
+      "senderName": "Team Member",
+      "text": "boys",
+      "createdAt": "2026-10-02T09:26:45.624Z"
+    }
   ]
 }

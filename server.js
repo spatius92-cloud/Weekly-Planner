@@ -87,6 +87,38 @@ app.get('/api/state', async (req, res) => {
   }
 });
 
+app.get('/api/chat', async (req, res) => {
+  try {
+    const db = await readDB();
+    res.json({ messages: db.chatMessages.slice(-100) });
+  } catch {
+    res.status(500).json({ error: 'Failed to load team chat.' });
+  }
+});
+
+app.post('/api/chat', async (req, res) => {
+  const senderId = typeof req.body.senderId === 'string' ? req.body.senderId : '';
+  const text = typeof req.body.text === 'string' ? req.body.text.trim() : '';
+  if (!senderId) return res.status(400).json({ error: 'Choose a team member before sending.' });
+  if (!text) return res.status(400).json({ error: 'Write a message before sending.' });
+  if (text.length > 1000) return res.status(400).json({ error: 'Messages must be 1,000 characters or fewer.' });
+
+  const db = await readDB();
+  const sender = db.members.find((member) => member.id === senderId);
+  if (!sender) return res.status(404).json({ error: 'Team member not found.' });
+
+  const message = {
+    id: id('c'),
+    senderId: sender.id,
+    senderName: sender.name,
+    text,
+    createdAt: new Date().toISOString(),
+  };
+  db.chatMessages = [...db.chatMessages, message].slice(-500);
+  await writeDB(db);
+  res.status(201).json(message);
+});
+
 app.post('/api/members', async (req, res) => {
   const name = (req.body.name || '').trim();
   const phone = normalizePhone(req.body.phone);
