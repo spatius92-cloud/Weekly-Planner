@@ -15,7 +15,8 @@
     "cap:android": "npm run build:android && cap sync android",
     "cap:ios": "npm run build && cap sync ios",
     "desktop:dev": "npm run build && electron electron/main.cjs",
-    "desktop:dist": "npm run build && electron-builder --config electron-builder.config.json"
+    "desktop:dist": "npm run desktop:dist:win",
+    "desktop:dist:win": "node -e \"if (!process.env.CSC_LINK && !process.env.WIN_CSC_LINK) { console.error('Set CSC_LINK or WIN_CSC_LINK to a trusted Windows code-signing certificate.'); process.exit(1) }\" && npm run build && electron-builder --config electron-builder.config.json --win nsis --x64 --arm64"
   },
   "engines": {
     "node": ">=18"

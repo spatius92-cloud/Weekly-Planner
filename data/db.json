@@ -3,12 +3,14 @@
     {
       "id": "m-founder",
       "name": "Team Member",
-      "color": "#6C5CE7"
+      "color": "#6C5CE7",
+      "phone": ""
     },
     {
       "id": "m-4de7da2abf08",
       "name": "Screw",
-      "color": "#00B894"
+      "color": "#00B894",
+      "phone": ""
     },
     {
       "id": "m-9050400a1ec1",
@@ -53,6 +55,13 @@
       "senderName": "Team Member",
       "text": "boys",
       "createdAt": "2026-10-02T09:26:45.624Z"
+    },
+    {
+      "id": "c-b5e821c2aa23",
+      "senderId": "m-founder",
+      "senderName": "Team Member",
+      "text": "marasta",
+      "createdAt": "2026-10-02T11:14:05.284Z"
     }
   ]
 }

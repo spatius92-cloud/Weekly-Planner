@@ -76,6 +76,28 @@ npm run cap:android
 npm run cap:ios
 ```
 
+### Windows desktop installer
+
+Create x64 and ARM64 per-user Windows installers with:
+
+```bash
+npm run desktop:dist:win
+```
+
+The installers are written to `release/` and do not require administrator
+access. The release command requires a signing certificate so it cannot silently
+produce an unsigned installer. Set `CSC_LINK` or `WIN_CSC_LINK` to your PFX file
+or secure certificate URL. Set `CSC_KEY_PASSWORD` for a password-protected PFX.
+Unsigned installers can trigger Microsoft Defender SmartScreen's
+unknown-publisher warning on other computers. To publish without that warning,
+sign the app and installer with a trusted code-signing certificate. Set
+these values before running the command. Keep the certificate and password out
+of the repository. A new or
+low-reputation signing identity can still receive a SmartScreen warning while
+its reputation is established; no installer setting can guarantee bypassing
+that Windows reputation check. If Defender labels a signed build as malware,
+submit the installer to Microsoft's Security Intelligence portal for review.
+
 Android builds use the shared Vercel API configured in `.env.android`. Deploy
 the API's CORS support before installing a newly built APK so the app can read
 and write the shared planner state.

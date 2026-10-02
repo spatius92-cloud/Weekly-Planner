@@ -15,7 +15,25 @@
       "to": "seed-db.json"
     }
   ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64", "arm64"]
+      }
+    ],
+    "artifactName": "Weekly-Planner-Setup-${version}-${arch}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowElevation": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Weekly Planner"
+  },
   "directories": {
-    "output": "C:/Users/UniPod/AppData/Local/WeeklyPlannerBuild"
+    "output": "release"
   }
 }
