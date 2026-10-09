@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { App as CapacitorApp } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { LocalNotifications } from '@capacitor/local-notifications'
 import { PushNotifications } from '@capacitor/push-notifications'
 import './App.css'
 
-const PHONE_NOTIFICATION_CHANNEL_ID = 'planner-updates-v3'
+const PHONE_NOTIFICATION_CHANNEL_ID = 'planner-updates-v4'
 const PHONE_NOTIFICATION_SOUND = 'planner_notification.wav'
 
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -57,6 +58,12 @@ function mondayOf(date) {
 
 function isoDate(date) {
   return new Date(date).toISOString().slice(0, 10)
+}
+
+function isSameLocalDay(first, second) {
+  return first.getFullYear() === second.getFullYear()
+    && first.getMonth() === second.getMonth()
+    && first.getDate() === second.getDate()
 }
 
 function addDays(date, n) {
@@ -155,12 +162,47 @@ function App() {
   const [chatSending, setChatSending] = useState(false)
   const [chatError, setChatError] = useState('')
   const chatEndRef = useRef(null)
+  const nativePushListenersRef = useRef(null)
+  const [today, setToday] = useState(() => new Date())
   const [theme, setTheme] = useState(() => {
     if (typeof window === 'undefined') return 'light'
     const storedTheme = window.localStorage.getItem(THEME_KEY)
     if (storedTheme === 'light' || storedTheme === 'dark') return storedTheme
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
   })
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return undefined
+
+    let active = true
+    let backButtonListener
+    CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      if (chatOpen) {
+        setChatOpen(false)
+      } else if (membersModalOpen) {
+        setMembersModalOpen(false)
+      } else if (moveModalOpen) {
+        closeMoveModal()
+      } else if (taskModalOpen) {
+        closeTaskModal()
+      } else if (canGoBack) {
+        window.history.back()
+      }
+    }).then((listener) => {
+      if (active) {
+        backButtonListener = listener
+      } else {
+        listener.remove()
+      }
+    }).catch((error) => {
+      if (active) notify(`Native back navigation could not be initialized: ${error.message}`)
+    })
+
+    return () => {
+      active = false
+      backButtonListener?.remove()
+    }
+  }, [chatOpen, membersModalOpen, moveModalOpen, taskModalOpen])
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ members, tasks }))
@@ -179,6 +221,11 @@ function App() {
         if (!active) return
         setMembers(Array.isArray(serverState.members) ? serverState.members : [])
         setTasks(Array.isArray(serverState.tasks) ? serverState.tasks : [])
+        setSelectedUserId((current) => (
+          Array.isArray(serverState.members) && serverState.members.some((member) => member.id === current)
+            ? current
+            : serverState.members?.[0]?.id || ''
+        ))
         setServerReady(true)
         hasReportedConnectionError = false
       } catch {
@@ -218,7 +265,7 @@ function App() {
     if (Capacitor.isNativePlatform()) {
       let active = true
       let listeners = []
-      Promise.all([
+      const listenerSetup = Promise.all([
         PushNotifications.addListener('registration', async ({ value }) => {
           try {
             await api('/api/push/subscribe', {
@@ -245,7 +292,9 @@ function App() {
             }],
           }).catch((error) => notify(error.message))
         }),
-      ]).then(async (handles) => {
+      ])
+      nativePushListenersRef.current = listenerSetup
+      listenerSetup.then(async (handles) => {
         if (!active) {
           handles.forEach((handle) => handle.remove())
           return
@@ -274,6 +323,7 @@ function App() {
       })
       return () => {
         active = false
+        if (nativePushListenersRef.current === listenerSetup) nativePushListenersRef.current = null
         listeners.forEach((handle) => handle.remove())
       }
     }
@@ -352,6 +402,16 @@ function App() {
   }, [toast])
 
   useEffect(() => {
+    const updateToday = () => setToday(new Date())
+    const timer = window.setInterval(updateToday, 60_000)
+    window.addEventListener('focus', updateToday)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', updateToday)
+    }
+  }, [])
+
+  useEffect(() => {
     document.documentElement.dataset.theme = theme
     document.documentElement.style.colorScheme = theme
     window.localStorage.setItem(THEME_KEY, theme)
@@ -411,6 +471,9 @@ function App() {
             sound: PHONE_NOTIFICATION_SOUND,
           })
         }
+        const listenersReady = nativePushListenersRef.current
+        if (!listenersReady) throw new Error('Notifications are still initializing. Please try again.')
+        await listenersReady
         await PushNotifications.register()
         notify('Phone alerts enabled')
       } else {
@@ -860,7 +923,7 @@ function App() {
                   const dayTasks = weekTasks.filter((task) => task.day === dayIndex)
 
                   return (
-                    <div key={`${weekStartIso}-${dayIndex}`} className={`day-column ${isoDate(date) === isoDate(new Date()) ? 'is-today' : ''}`}>
+                    <div key={`${weekStartIso}-${dayIndex}`} className={`day-column ${isSameLocalDay(date, today) ? 'is-today' : ''}`}>
                       <div className="day-header">
                         <div className="day-name">{name}</div>
                         <div className="day-date">{date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</div>

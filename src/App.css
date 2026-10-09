@@ -317,8 +317,21 @@ textarea {
 }
 
 .day-column.is-today {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 1px var(--brand);
+  border: 2px solid var(--brand);
+  box-shadow: 0 0 0 2px rgba(108, 92, 231, 0.14);
+}
+
+.day-column.is-today .day-header {
+  background: var(--surface-alt);
+  border-bottom: 2px solid var(--brand);
+}
+
+.day-column.is-today .day-name {
+  color: var(--brand-dark);
+}
+
+.day-column.is-today .day-date {
+  color: var(--text);
 }
 
 .day-header {

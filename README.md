@@ -101,6 +101,8 @@ submit the installer to Microsoft's Security Intelligence portal for review.
 Android builds use the shared Vercel API configured in `.env.android`. Deploy
 the API's CORS support before installing a newly built APK so the app can read
 and write the shared planner state.
+On Android, the native back action closes the open planner dialog first and
+keeps the app on the planner when there is no previous in-app page.
 
 ### Planner notifications
 
@@ -115,6 +117,9 @@ service-account key and configure `FIREBASE_SERVICE_ACCOUNT_JSON` as a protected
 environment variable on the API host. Keep the service-account key private and
 never commit it. Each Android installation must open the planner and enable
 phone alerts to register its device.
+Chat alerts go to other team members who enabled phone alerts; the sender does
+not receive a notification for their own message. The bundled short planner
+chime is used for native phone notifications.
 
 Email alerts are enabled per member in **Team** settings. Configure `RESEND_API_KEY`
 and `RESEND_FROM` on the API host, and verify the sender domain in Resend. Team
