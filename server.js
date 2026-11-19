@@ -10,6 +10,7 @@ const { sendWhatsApp, hasTwilio } = require('./lib/notify');
 const { sendPush, hasVapid, hasFirebase } = require('./lib/push');
 const { sendEmail, hasEmail } = require('./lib/email');
 const {
+  taskDateLabel,
   assignedMessage,
   statusChangedMessage,
   reminderMessage,
@@ -54,6 +55,20 @@ function isValidISODate(value) {
   if (typeof value !== 'string' || !ISO_DATE_RE.test(value)) return false;
   const date = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function taskEmailText(db, task, heading) {
+  const assignee = db.members.find((member) => member.id === task.assigneeId);
+  const lines = [
+    heading,
+    '',
+    `"${task.title}"`,
+    `${taskDateLabel(task)}${task.time ? ' at ' + task.time : ''}`,
+    `Assigned to: ${assignee ? assignee.name : 'Unassigned'}`,
+    `Status: ${task.status}`,
+  ];
+  if (task.notes) lines.push('', task.notes);
+  return lines.join('\n');
 }
 
 // --- browser push helpers ---------------------------------------------------
@@ -180,6 +195,28 @@ app.get('/api/notifications/status', (req, res) => {
   res.json({ webPush: hasVapid, androidPush: hasFirebase, email: hasEmail });
 });
 
+// Sends a test push + email to one member so they can confirm their setup.
+app.post('/api/notifications/test', async (req, res) => {
+  const db = await readDB();
+  const member = db.members.find((item) => item.id === req.body?.memberId);
+  if (!member) return res.status(404).json({ error: 'Team member not found.' });
+
+  const devices = memberSubscriptions(db, member.id);
+  const wantsEmail = member.emailNotifications && EMAIL_RE.test(member.email || '');
+  const [pushResults, emailResult] = await Promise.all([
+    Promise.all(devices.map((device) => sendPush(device, { title: 'Test notification', body: `Hi ${member.name}, planner alerts are working.`, tag: 'test' }))),
+    wantsEmail
+      ? sendEmail(member.email, 'Test notification', `Hi ${member.name}, planner email alerts are working.`)
+      : Promise.resolve(null),
+  ]);
+  res.json({
+    member: member.name,
+    devices: devices.length,
+    pushSent: pushResults.filter((result) => result.sent).length,
+    email: wantsEmail ? (emailResult.sent ? 'sent' : 'failed') : 'off',
+  });
+});
+
 app.post('/api/push/subscribe', async (req, res) => {
   const { subscription, token, platform = 'web', memberId } = req.body;
   const isAndroid = platform === 'android';
@@ -298,7 +335,7 @@ app.post('/api/tasks', async (req, res) => {
     title: 'New planner activity',
     body: task.title,
     tag: `task-${task.id}`,
-  }, { emailSubject: 'New planner activity', emailText: `New activity: ${task.title}` });
+  }, { emailSubject: 'New planner activity', emailText: taskEmailText(db, task, 'A new activity was added to the planner.') });
 
   res.status(201).json(task);
 });
@@ -354,7 +391,7 @@ app.put('/api/tasks/:id', async (req, res) => {
       title: 'Planner activity updated',
       body: task.title,
       tag: `task-${task.id}`,
-    }, { emailSubject: 'Planner activity updated', emailText: `Activity updated: ${task.title}` });
+    }, { emailSubject: 'Planner activity updated', emailText: taskEmailText(db, task, 'An activity was updated.') });
   }
 
   res.json(task);
@@ -382,7 +419,7 @@ app.patch('/api/tasks/:id/status', async (req, res) => {
       title: 'Planner status changed',
       body: `${task.title}: ${task.status}`,
       tag: `task-${task.id}`,
-    }, { emailSubject: 'Planner status changed', emailText: `${task.title} is now ${task.status}.` });
+    }, { emailSubject: 'Planner status changed', emailText: taskEmailText(db, task, `Status changed to ${task.status}.`) });
   }
 
   res.json(task);
@@ -451,7 +488,7 @@ app.delete('/api/tasks/:id', async (req, res) => {
     title: 'Planner activity removed',
     body: task.title,
     tag: `task-${task.id}`,
-  }, { emailSubject: 'Planner activity removed', emailText: `Activity removed: ${task.title}` });
+  }, { emailSubject: 'Planner activity removed', emailText: taskEmailText(db, task, 'This activity was removed from the planner.') });
   res.status(204).end();
 });
 
@@ -480,11 +517,18 @@ async function runDigest(db, weekStart, { weekly, todayIndex }) {
 
   for (const member of db.members) {
     const subs = memberSubscriptions(db, member.id);
-    if (!member.phone && !subs.length) continue;
+    const wantsEmail = member.emailNotifications && EMAIL_RE.test(member.email || '');
+    if (!member.phone && !subs.length && !wantsEmail) continue;
 
     const tasks = db.tasks.filter(
       (t) => t.assigneeId === member.id && t.weekStart === weekStart && (weekly || t.day === todayIndex)
     );
+
+    if (wantsEmail) {
+      const subject = weekly ? 'Your week ahead on the planner' : "Today's planner activities";
+      const result = await sendEmail(member.email, subject, digestMessage(member, tasks, { weekly }));
+      results.push({ member: member.name, channel: 'email', ...result });
+    }
 
     if (member.phone) {
       const result = await sendWhatsApp(member.phone, digestMessage(member, tasks, { weekly }));

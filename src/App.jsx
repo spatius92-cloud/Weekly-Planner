@@ -523,6 +523,19 @@ function App() {
     }
   }
 
+  async function sendTestNotification(memberId) {
+    if (!requireServer()) return
+    try {
+      const result = await api('/api/notifications/test', {
+        method: 'POST',
+        body: JSON.stringify({ memberId }),
+      })
+      notify(`Test sent to ${result.member}: ${result.pushSent}/${result.devices} devices, email ${result.email}`)
+    } catch (error) {
+      notify(error.message)
+    }
+  }
+
   async function handleChatSubmit(event) {
     event.preventDefault()
     const text = chatDraft.trim()
@@ -1110,6 +1123,7 @@ function App() {
                       Email alerts
                     </label>
                     <button type="button" className="ghost-btn" onClick={() => saveMemberEmailSettings(member.id)}>Save</button>
+                    <button type="button" className="ghost-btn" onClick={() => sendTestNotification(member.id)}>Send test</button>
                   </div>
                   <input
                     type="tel"

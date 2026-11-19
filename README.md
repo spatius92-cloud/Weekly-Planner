@@ -121,8 +121,15 @@ Chat alerts go to other team members who enabled phone alerts; the sender does
 not receive a notification for their own message. The bundled short planner
 chime is used for native phone notifications.
 
-Email alerts are enabled per member in **Team** settings. Configure `RESEND_API_KEY`
-and `RESEND_FROM` on the API host, and verify the sender domain in Resend. Team
+Email alerts are enabled per member in **Team** settings and are sent from the
+Frame & Frqnc Google Workspace. On the API host set `SMTP_USER` (a
+`@frame-frqnc.com` mailbox), `SMTP_PASS` (a Google App Password for that
+mailbox, which requires 2-Step Verification), optionally `EMAIL_FROM` (for example
+`Frame & Frqnc Planner <planner@frame-frqnc.com>`, which must be the mailbox or an
+alias on it), and `PLANNER_URL` (the planner's public address, used for links in
+emails). Resend (`RESEND_API_KEY` + `RESEND_FROM`) still works as a fallback. The
+**Send test** button next to each member sends that person a test push and email.
+Daily and weekly digests are also emailed. Team
 members need a valid saved email address and must turn on **Email alerts**.
 Chat messages, activity changes, and team membership changes are then sent to
 their opted-in email addresses. The manual activity reminder also uses enabled
