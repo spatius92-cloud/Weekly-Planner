@@ -1,5 +1,13 @@
 {
   "buildCommand": "npm run build",
+  "redirects": [
+    {
+      "source": "/((?!api/).*)",
+      "has": [{ "type": "host", "value": "frame-frqnc-weekly-planner.vercel.app" }],
+      "destination": "https://planner.frame-frqnc.com/$1",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index" },
     { "source": "/", "destination": "/public/index.html" },
